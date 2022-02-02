@@ -11,9 +11,17 @@ object Main extends App {
     val consumerController = context.spawn(ConsumerController[FibonacciConsumer.Command](), "consumerController")
     context.spawn(FibonacciConsumer(consumerController), "consumer")
 
+//    import akka.persistence.typed.delivery.EventSourcedProducerQueue
+//    import akka.persistence.typed.PersistenceId
+//    val durableQueue =
+//      EventSourcedProducerQueue[FibonacciConsumer.Command](PersistenceId.ofUniqueId("producerDurableQueue"))
+//    val durableQueueBehavior = Some(durableQueue)
+
+    val durableQueueBehavior = None
+
     val producerId = s"fibonacci-${UUID.randomUUID()}"
     val producerController = context.spawn(
-      ProducerController[FibonacciConsumer.Command](producerId, durableQueueBehavior = None),
+      ProducerController[FibonacciConsumer.Command](producerId, durableQueueBehavior),
       "producerController"
     )
     context.spawn(FibonacciProducer(producerController), "producer")

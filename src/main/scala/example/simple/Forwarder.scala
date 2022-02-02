@@ -1,5 +1,5 @@
 package example.simple
-
+// https://gist.github.com/patriknw/514bae62134050f24ca7af95ee977e54
 import akka.actor.typed.scaladsl.{ Behaviors, LoggerOps }
 import akka.actor.typed.{ ActorRef, Behavior }
 import akka.persistence.typed.scaladsl.{ Effect, EventSourcedBehavior, RetentionCriteria }
@@ -63,14 +63,14 @@ object Forwarder {
                   // タイマーを仕掛ける。タイムアウト時はRedeliverを送信する
                   timers.startSingleTimer(deliveryId, ForwardRetry(deliveryId, 2), forwardTimeout)
                 }
-              // 返信がきたとき
+              // タイムアウトせずに返信がきたとき
               case WrappedReply(Destination.Reply(deliveryId)) =>
                 context.log.info("Confirmed #{} from {}", deliveryId, destinationRef)
                 // タイマーを停止する
                 timers.cancel(deliveryId)
                 // 送信完了イベントを永続化
                 Effect.persist(MessageReplied(deliveryId))
-              // 返信がないとき
+              // タイムアウトして返信がないとき
               case ForwardRetry(deliveryId, attempt) =>
                 context.log.infoN("Redeliver #{}, attempt {}, to {}", deliveryId, attempt, destinationRef)
                 // 状態からペイロードを取得

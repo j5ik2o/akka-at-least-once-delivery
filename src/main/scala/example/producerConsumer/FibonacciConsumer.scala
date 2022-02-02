@@ -8,9 +8,8 @@ object FibonacciConsumer {
   def apply(consumerController: ActorRef[ConsumerController.Command[FibonacciConsumer.Command]]): Behavior[Command] = {
     Behaviors.setup { context =>
       val deliveryAdapter =
-        context.messageAdapter[ConsumerController.Delivery[FibonacciConsumer.Command]](WrappedDelivery(_))
+        context.messageAdapter[ConsumerController.Delivery[FibonacciConsumer.Command]](WrappedDelivery)
       consumerController ! ConsumerController.Start(deliveryAdapter)
-
       Behaviors.receiveMessagePartial {
         case WrappedDelivery(ConsumerController.Delivery(FibonacciNumber(n, value), confirmTo)) =>
           context.log.info("Processed fibonacci {}: {}", n, value)
