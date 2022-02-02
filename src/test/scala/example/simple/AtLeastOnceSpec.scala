@@ -31,23 +31,22 @@ class AtLeastOnceSpec extends ScalaTestWithActorTestKit(AtLeastOnceSpec.config) 
     "deliver and confirm when no message loss" in {
       val destinationProbe = createTestProbe[Destination.Command]()
       val destination      = spawn(Behaviors.monitor(destinationProbe.ref, Destination()))
-      val sender           = spawn(Forwarder(PersistenceId.ofUniqueId("pid1"), destination, 2.seconds))
+      val forwarder        = spawn(Forwarder(PersistenceId.ofUniqueId("pid1"), destination, 2.seconds))
 
-      sender ! Forwarder.Forward(Destination.Payload("a"))
+      forwarder ! Forwarder.Forward(Destination.Payload("a"))
       val msg1 = destinationProbe.expectMessageType[Destination.Request]
       msg1.deliveryId should ===(1L)
       msg1.payload should ===(Destination.Payload("a"))
 
-      sender ! Forwarder.Forward(Destination.Payload("b"))
+      forwarder ! Forwarder.Forward(Destination.Payload("b"))
       val msg2 = destinationProbe.expectMessageType[Destination.Request]
       msg2.deliveryId should ===(2L)
       msg2.payload should ===(Destination.Payload("b"))
 
-      // no redelivery after confirmation
-      // 確認後の再配達不可
+      // 返信後にメッセージが受信されないこと
       destinationProbe.expectNoMessage(3.seconds)
 
-      testKit.stop(sender)
+      testKit.stop(forwarder)
     }
 
     "redeliver lost messages" in {
@@ -62,13 +61,13 @@ class AtLeastOnceSpec extends ScalaTestWithActorTestKit(AtLeastOnceSpec.config) 
             }
           )
         )
-      val sender = spawn(Forwarder(PersistenceId.ofUniqueId("pid2"), destination, 2.second))
+      val forwarder = spawn(Forwarder(PersistenceId.ofUniqueId("pid2"), destination, 2.second))
 
-      sender ! Forwarder.Forward(Destination.Payload("a"))
-      sender ! Forwarder.Forward(Destination.Payload("b"))
-      sender ! Forwarder.Forward(Destination.Payload("c"))
-      sender ! Forwarder.Forward(Destination.Payload("d"))
-      sender ! Forwarder.Forward(Destination.Payload("e"))
+      forwarder ! Forwarder.Forward(Destination.Payload("a"))
+      forwarder ! Forwarder.Forward(Destination.Payload("b"))
+      forwarder ! Forwarder.Forward(Destination.Payload("c"))
+      forwarder ! Forwarder.Forward(Destination.Payload("d"))
+      forwarder ! Forwarder.Forward(Destination.Payload("e"))
 
       outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(1L)
       innerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(1L)
@@ -96,8 +95,8 @@ class AtLeastOnceSpec extends ScalaTestWithActorTestKit(AtLeastOnceSpec.config) 
       outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(4L)
       innerDestinationProbe.expectNoMessage() // but still dropped, しかしそれでもドロップされた
 
-      // senderを停止
-      testKit.stop(sender)
+      // forwarderを停止
+      testKit.stop(forwarder)
 
       // and redelivery should continue after recovery, same pid
       // で、復旧後も再配信を継続する必要があり、同じpid
