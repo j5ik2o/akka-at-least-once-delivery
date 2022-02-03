@@ -40,20 +40,29 @@ object FibonacciProducer {
         context.messageAdapter[ProducerController.RequestNext[FibonacciConsumer.Command]](WrappedRequestNext)
       producerController ! ProducerController.Start(requestNextAdapter)
 
-      fibonacci(0, 1, 0)
+      fibonacciTell(0, 1, 0)
     }
   }
 
-  import akka.util.Timeout
-  implicit val askTimeout: Timeout = 5.seconds
+  // tellする場合
+  private def fibonacciTell(n: Long, b: BigInt, a: BigInt): Behavior[Command] = {
+    Behaviors.receive { case (context, WrappedRequestNext(next)) =>
+      context.log.info("Generated fibonacci {}: {}", n, a)
+      next.sendNextTo ! FibonacciConsumer.FibonacciNumber(n, a)
+      if (n == 1000)
+        Behaviors.stopped
+      else
+        fibonacciTell(n + 1, a + b, b)
+    }
+  }
 
-  private def fibonacci(n: Long, b: BigInt, a: BigInt): Behavior[Command] = {
+  // askする場合
+  private def fibonacciAsk(n: Long, b: BigInt, a: BigInt): Behavior[Command] = {
     Behaviors.receive {
       case (context, WrappedRequestNext(next)) =>
         context.log.info("Generated fibonacci {}: {}", n, a)
-// tellする場合
-//       next.sendNextTo ! FibonacciConsumer.FibonacciNumber(n, a)
-// askする場合
+        import akka.util.Timeout
+        implicit val askTimeout: Timeout = 5.seconds
         // 注意:返信はProducerController.SeqNrであってConsumerの返答ではない
         context.ask[MessageWithConfirmation[FibonacciConsumer.Command], ProducerController.SeqNr](
           next.askNextTo,
@@ -72,7 +81,7 @@ object FibonacciProducer {
           if (n == 1000)
             Behaviors.stopped
           else
-            fibonacci(n + 1, a + b, b)
+            fibonacciAsk(n + 1, a + b, b)
         }
     }
   }
