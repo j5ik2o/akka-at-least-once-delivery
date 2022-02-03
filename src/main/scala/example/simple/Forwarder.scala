@@ -58,7 +58,7 @@ object Forwarder {
                 Effect.persist(MessageSent(payload)).thenRun { newState =>
                   val deliveryId = newState.lastDeliveryId
                   context.log.info("Deliver #{} to {}", deliveryId, destinationRef)
-                  // 宛先のアクターへメッセージを送信する
+                  // 宛先のアクターへメッセージを送信する(tell)
                   destinationRef ! Destination.Request(deliveryId, payload, confirmAdapter)
                   // タイマーを仕掛ける。タイムアウト時はRedeliverを送信する
                   timers.startSingleTimer(deliveryId, ForwardRetry(deliveryId, 2), forwardTimeout)
