@@ -27,8 +27,6 @@ object Forwarder {
 
   final case class MessageReplied(deliveryId: Long) extends Event
 
-  // key in the `pending` Map is the deliveryId
-  // using Map[String, _] due to serialization problem of Map[Long, _]
   final case class State(
       lastDeliveryId: Long,
       pendingPayloads: Map[String, Destination.Payload]

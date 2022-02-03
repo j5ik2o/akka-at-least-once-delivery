@@ -1,11 +1,10 @@
-package example.producerConsumer
+package example.delivery
 
-import akka.actor.typed.ActorRef
-import akka.actor.typed.Behavior
-import akka.actor.typed.delivery.{ ConsumerController, ProducerController }
+import akka.actor.typed.delivery.ProducerController
 import akka.actor.typed.delivery.ProducerController.MessageWithConfirmation
 import akka.actor.typed.scaladsl.Behaviors
-import example.producerConsumer.FibonacciConsumer.RegisterProducerController
+import akka.actor.typed.{ ActorRef, Behavior }
+import example.delivery.FibonacciConsumer.RegisterProducerController
 
 import java.util.UUID
 import scala.concurrent.duration.DurationInt

@@ -1,4 +1,4 @@
-package example.producerConsumer
+package example.delivery
 
 import akka.actor.typed.delivery.{ ConsumerController, ProducerController }
 import akka.actor.typed.scaladsl.Behaviors
