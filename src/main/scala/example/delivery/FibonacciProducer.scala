@@ -27,16 +27,20 @@ object FibonacciProducer {
       // Noneはインメモリでしか状態を保存しないので、ノード障害などに耐性がなくなる。
       val durableQueueBehavior = None
 
+      // プロデューサコントローラを生成する
       val producerId = s"fibonacci-${UUID.randomUUID()}"
       val producerController: ActorRef[ProducerController.Command[FibonacciConsumer.Command]] = context.spawn(
         ProducerController[FibonacciConsumer.Command](producerId, durableQueueBehavior),
         "producerController"
       )
 
+      // コンシューマ内部のコンシューマコントローラにプロデューサーコントローラを登録させる
       consumerRef ! RegisterProducerController(producerController)
 
+      // メッセージアダプタを生成する
       val requestNextAdapter =
         context.messageAdapter[ProducerController.RequestNext[FibonacciConsumer.Command]](WrappedRequestNext)
+      // プロデューサコントローラを開始する
       producerController ! ProducerController.Start(requestNextAdapter)
 
       fibonacciTell(0, 1, 0)
@@ -45,13 +49,16 @@ object FibonacciProducer {
 
   // tellする場合
   private def fibonacciTell(n: Long, b: BigInt, a: BigInt): Behavior[Command] = {
-    Behaviors.receive { case (context, WrappedRequestNext(next)) =>
-      context.log.info("Generated fibonacci {}: {}", n, a)
-      next.sendNextTo ! FibonacciConsumer.FibonacciNumber(n, a)
-      if (n == 1000)
-        Behaviors.stopped
-      else
-        fibonacciTell(n + 1, a + b, b)
+    Behaviors.receive {
+      // プロデューサコントローラからメッセージがきたら
+      case (context, WrappedRequestNext(next)) =>
+        context.log.info("Generated fibonacci {}: {}", n, a)
+        // プロデューサコントローラにメッセージを送信する
+        next.sendNextTo ! FibonacciConsumer.FibonacciNumber(n, a)
+        if (n == 1000)
+          Behaviors.stopped
+        else
+          fibonacciTell(n + 1, a + b, b)
     }
   }
 
