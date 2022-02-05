@@ -4,7 +4,7 @@ import akka.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ Behavior, BehaviorInterceptor, TypedActorContext }
 import akka.persistence.typed.PersistenceId
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ Config, ConfigFactory }
 import example.CborSerializable
 import org.scalatest.wordspec.AnyWordSpecLike
 
@@ -13,7 +13,7 @@ import scala.concurrent.duration.DurationInt
 
 object AtLeastOnceSpec {
 
-  val config = ConfigFactory.parseString(s"""
+  val config: Config = ConfigFactory.parseString(s"""
     akka.persistence.journal.plugin = "akka.persistence.journal.inmem"
     akka.persistence.journal.inmem.test-serialization = on
     akka.persistence.snapshot-store.plugin = "akka.persistence.snapshot-store.local"
@@ -29,103 +29,117 @@ class AtLeastOnceSpec extends ScalaTestWithActorTestKit(AtLeastOnceSpec.config) 
 
   "AtLeastOnce with Persistence Typed" must {
     "deliver and confirm when no message loss" in {
-      val destinationProbe = createTestProbe[Destination.Command]()
-      val destination      = spawn(Behaviors.monitor(destinationProbe.ref, Destination()))
-      val forwarder        = spawn(Forwarder(PersistenceId.ofUniqueId("pid1"), destination, 2.seconds))
+      val receiverProbe = createTestProbe[Receiver.Command]()
+      val receiver      = spawn(Behaviors.monitor(receiverProbe.ref, Receiver()))
+      val forwarder     = spawn(Forwarder(UUID.randomUUID(), receiver, 2.seconds))
 
-      forwarder ! Forwarder.Forward(Destination.Payload("a"))
-      val msg1 = destinationProbe.expectMessageType[Destination.Request]
-      msg1.deliveryId should ===(1L)
-      msg1.payload should ===(Destination.Payload("a"))
+      forwarder ! Forwarder.Forward(Receiver.Payload("a"))
+      val message1 = receiverProbe.expectMessageType[Receiver.Request]
+      message1.deliveryId should ===(1L)
+      message1.payload should ===(Receiver.Payload("a"))
 
-      forwarder ! Forwarder.Forward(Destination.Payload("b"))
-      val msg2 = destinationProbe.expectMessageType[Destination.Request]
-      msg2.deliveryId should ===(2L)
-      msg2.payload should ===(Destination.Payload("b"))
+      forwarder ! Forwarder.Forward(Receiver.Payload("b"))
+      val message2 = receiverProbe.expectMessageType[Receiver.Request]
+      message2.deliveryId should ===(2L)
+      message2.payload should ===(Receiver.Payload("b"))
 
       // 返信後にメッセージが受信されないこと
-      destinationProbe.expectNoMessage(3.seconds)
+      receiverProbe.expectNoMessage(3.seconds)
 
       testKit.stop(forwarder)
     }
 
     "redeliver lost messages" in {
-      val outerDestinationProbe = createTestProbe[Destination.Command]()
-      val innerDestinationProbe = createTestProbe[Destination.Command]()
-      val destination =
+      // 受信側の準備
+      val outerReceiverProbe = createTestProbe[Receiver.Command]()
+      val innerReceiverProbe = createTestProbe[Receiver.Command]()
+      val receiverRef =
         spawn(
           Behaviors.monitor(
-            outerDestinationProbe.ref,
+            outerReceiverProbe.ref,
             filterMessage(m => m.deliveryId == 3 || m.deliveryId == 4) {
-              Behaviors.monitor(innerDestinationProbe.ref, Destination())
+              Behaviors.monitor(innerReceiverProbe.ref, Receiver())
             }
           )
         )
-      val forwarder = spawn(Forwarder(PersistenceId.ofUniqueId("pid2"), destination, 2.second))
 
-      forwarder ! Forwarder.Forward(Destination.Payload("a"))
-      forwarder ! Forwarder.Forward(Destination.Payload("b"))
-      forwarder ! Forwarder.Forward(Destination.Payload("c"))
-      forwarder ! Forwarder.Forward(Destination.Payload("d"))
-      forwarder ! Forwarder.Forward(Destination.Payload("e"))
+      val id        = UUID.randomUUID()
+      val forwarder = spawn(Forwarder(id, receiverRef, 2.second))
 
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(1L)
-      innerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(1L)
+      // フォワーダーを介してメッセージを送信する
+      forwarder ! Forwarder.Forward(Receiver.Payload("a"))
+      forwarder ! Forwarder.Forward(Receiver.Payload("b"))
+      forwarder ! Forwarder.Forward(Receiver.Payload("c"))
+      forwarder ! Forwarder.Forward(Receiver.Payload("d"))
+      forwarder ! Forwarder.Forward(Receiver.Payload("e"))
 
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(2L)
-      innerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(2L)
+      // 1が送信された
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(1L)
+      // 1が受信された
+      innerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(1L)
 
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(3L)
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(4L)
+      // 2が送信された
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(2L)
+      // 2が受信された
+      innerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(2L)
 
-      // 3 and 4 dropped and not delivered to innerDestinationProbe
-      // 3と4がドロップされ、innerDestinationProbeに配信されない。
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(5L)
-      innerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(5L)
+      // 3が送信された
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(3L)
+      // 4が送信された
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(4L)
 
-      // redelivered
-      // 再送
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(3L)
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(4L)
-      innerDestinationProbe.expectNoMessage() // but still dropped, しかしそれでもドロップされた
+      // 3と4がドロップされinnerには届かない
 
-      // redelivered again
-      // 再再送
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(3L)
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(4L)
-      innerDestinationProbe.expectNoMessage() // but still dropped, しかしそれでもドロップされた
+      // 5が送信された
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(5L)
+      // 5が受信された(本来であれば届かないで3,4が届くまでstashしたほうがいい)
+      innerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(5L)
+
+      // 再送1
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(3L)
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(4L)
+      innerReceiverProbe.expectNoMessage() // ドロップされるので届かない
+
+      // 再送2
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(3L)
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(4L)
+      innerReceiverProbe.expectNoMessage() // ドロップされるので届かない
 
       // forwarderを停止
       testKit.stop(forwarder)
 
-      // and redelivery should continue after recovery, same pid
-      // で、復旧後も再配信を継続する必要があり、同じpid
-      val sender2 = spawn(Forwarder(PersistenceId.ofUniqueId("pid2"), destination, 2.second))
+      // で、forwarder再起動後も継続的に再送される
+      val sender2 = spawn(Forwarder(id, receiverRef, 2.second))
 
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(3L)
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(4L)
-      innerDestinationProbe.expectNoMessage() // but still dropped, しかしそれでもドロップされた
+      // 再送3
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(3L)
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(4L)
+      innerReceiverProbe.expectNoMessage() // ドロップされるので届かない
 
-      sender2 ! Forwarder.Forward(Destination.Payload("f"))
-      outerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(6L)
-      innerDestinationProbe.expectMessageType[Destination.Request].deliveryId should ===(6L)
+      sender2 ! Forwarder.Forward(Receiver.Payload("f"))
+
+      // 6が送信された
+      outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(6L)
+      // 6が受信された(本来であれば届かないで3,4,5が届くまでstashしたほうがいい)
+      innerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(6L)
 
       testKit.stop(sender2)
     }
 
   }
 
+  // 指定した条件のメッセージをドロップするビヘイビア
   private def filterMessage(
-      f: Destination.Request => Boolean
-  )(destination: Behavior[Destination.Command]): Behavior[Destination.Command] = {
-    val interceptor = new BehaviorInterceptor[Destination.Command, Destination.Command] {
+      f: Receiver.Request => Boolean
+  )(destination: Behavior[Receiver.Command]): Behavior[Receiver.Command] = {
+    val interceptor = new BehaviorInterceptor[Receiver.Command, Receiver.Command] {
       override def aroundReceive(
-          ctx: TypedActorContext[Destination.Command],
-          msg: Destination.Command,
-          target: BehaviorInterceptor.ReceiveTarget[Destination.Command]
-      ): Behavior[Destination.Command] = {
+          ctx: TypedActorContext[Receiver.Command],
+          msg: Receiver.Command,
+          target: BehaviorInterceptor.ReceiveTarget[Receiver.Command]
+      ): Behavior[Receiver.Command] = {
         msg match {
-          case m: Destination.Request =>
+          case m: Receiver.Request =>
             if (f(m)) {
               ctx.asScala.log.info("Dropped #{}", m.deliveryId)
               Behaviors.same

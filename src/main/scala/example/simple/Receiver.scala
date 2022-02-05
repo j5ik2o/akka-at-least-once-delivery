@@ -6,7 +6,7 @@ import example.CborSerializable
 
 /** 宛先のアクター
   */
-object Destination {
+object Receiver {
 
   sealed trait Command
 
