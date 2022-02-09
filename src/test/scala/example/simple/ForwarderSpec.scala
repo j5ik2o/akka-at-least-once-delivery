@@ -61,7 +61,7 @@ class ForwarderSpec extends ScalaTestWithActorTestKit(ForwarderSpec.config) with
         spawn(
           Behaviors.monitor(
             outerReceiverProbe.ref,
-            filterMessage(m => m.deliveryId == 3 || m.deliveryId == 4) {
+            filterMessage(message => message.deliveryId == 3 || message.deliveryId == 4) {
               Behaviors.monitor(innerReceiverProbe.ref, Receiver())
             }
           )
