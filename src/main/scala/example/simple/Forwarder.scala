@@ -42,7 +42,7 @@ object Forwarder {
   ) extends CborSerializable {
 
     // ペンディングを追加する
-    def append(payload: Receiver.Message): State = {
+    def add(payload: Receiver.Message): State = {
       val nextDeliveryId = lastDeliveryId + 1
       copy(
         lastDeliveryId = nextDeliveryId,
@@ -138,7 +138,7 @@ object Forwarder {
       // 送信開始イベントのとき
       case MessageSent(payload) =>
         // ステートにペンディングエントリを追加
-        state.append(payload)
+        state.add(payload)
       // 送信完了イベントのとき
       case MessageReplied(deliveryId) =>
         // ステートからペンディングエントリを削除
