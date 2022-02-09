@@ -10,11 +10,11 @@ object Receiver {
 
   sealed trait Command
 
-  final case class Request(deliveryId: Long, payload: Payload, replyTo: ActorRef[Reply])
+  final case class Request(deliveryId: Long, payload: Message, replyTo: ActorRef[Reply])
       extends Command
       with CborSerializable
 
-  final case class Payload(s: String)
+  final case class Message(s: String)
 
   final case class Reply(deliveryId: Long) extends CborSerializable
 

@@ -6,18 +6,19 @@ import akka.actor.typed.{ Behavior, BehaviorInterceptor, TypedActorContext }
 import akka.persistence.typed.PersistenceId
 import com.typesafe.config.{ Config, ConfigFactory }
 import example.CborSerializable
+import org.scalatest.freespec.AnyFreeSpecLike
 import org.scalatest.wordspec.AnyWordSpecLike
 
 import java.util.UUID
 import scala.concurrent.duration.DurationInt
 
-object AtLeastOnceSpec {
+object ForwarderSpec {
 
   val config: Config = ConfigFactory.parseString(s"""
     akka.persistence.journal.plugin = "akka.persistence.journal.inmem"
     akka.persistence.journal.inmem.test-serialization = on
     akka.persistence.snapshot-store.plugin = "akka.persistence.snapshot-store.local"
-    akka.persistence.snapshot-store.local.dir = "target/AtLeastOnceSpec-${UUID.randomUUID().toString}"
+    akka.persistence.snapshot-store.local.dir = "target/${getClass.getName}-${UUID.randomUUID().toString}"
     akka.actor.serialization-bindings {
       "${classOf[CborSerializable].getName}" = jackson-cbor
     }
@@ -25,34 +26,37 @@ object AtLeastOnceSpec {
 
 }
 
-class AtLeastOnceSpec extends ScalaTestWithActorTestKit(AtLeastOnceSpec.config) with AnyWordSpecLike {
+class ForwarderSpec extends ScalaTestWithActorTestKit(ForwarderSpec.config) with AnyFreeSpecLike {
 
-  "AtLeastOnce with Persistence Typed" must {
-    "deliver and confirm when no message loss" in {
+  "at-least-onceに対応したForwarder" - {
+    "送信したメッセージが受信できる" in {
       val receiverProbe = createTestProbe[Receiver.Command]()
-      val receiver      = spawn(Behaviors.monitor(receiverProbe.ref, Receiver()))
-      val forwarder     = spawn(Forwarder(UUID.randomUUID(), receiver, 2.seconds))
+      val receiverRef   = spawn(Behaviors.monitor(receiverProbe.ref, Receiver()))
+      val forwarderRef  = spawn(Forwarder(UUID.randomUUID(), receiverRef, 2.seconds))
 
-      forwarder ! Forwarder.Forward(Receiver.Payload("a"))
+      forwarderRef ! Forwarder.Forward(Receiver.Message("a"))
       val message1 = receiverProbe.expectMessageType[Receiver.Request]
       message1.deliveryId should ===(1L)
-      message1.payload should ===(Receiver.Payload("a"))
+      message1.payload should ===(Receiver.Message("a"))
 
-      forwarder ! Forwarder.Forward(Receiver.Payload("b"))
+      forwarderRef ! Forwarder.Forward(Receiver.Message("b"))
       val message2 = receiverProbe.expectMessageType[Receiver.Request]
       message2.deliveryId should ===(2L)
-      message2.payload should ===(Receiver.Payload("b"))
+      message2.payload should ===(Receiver.Message("b"))
 
       // 返信後にメッセージが受信されないこと
       receiverProbe.expectNoMessage(3.seconds)
 
-      testKit.stop(forwarder)
+      testKit.stop(forwarderRef)
     }
 
-    "redeliver lost messages" in {
+    "ロストしたメッセージを再送できる。ただし受信できない" in {
       // 受信側の準備
+      // フィルターの外側のプローブ
       val outerReceiverProbe = createTestProbe[Receiver.Command]()
+      // フィルターの内側のプローブ
       val innerReceiverProbe = createTestProbe[Receiver.Command]()
+      // レシーバーへのアクター参照
       val receiverRef =
         spawn(
           Behaviors.monitor(
@@ -63,15 +67,15 @@ class AtLeastOnceSpec extends ScalaTestWithActorTestKit(AtLeastOnceSpec.config) 
           )
         )
 
-      val id        = UUID.randomUUID()
-      val forwarder = spawn(Forwarder(id, receiverRef, 2.second))
+      val id           = UUID.randomUUID()
+      val forwarderRef = spawn(Forwarder(id, receiverRef, 2.second))
 
       // フォワーダーを介してメッセージを送信する
-      forwarder ! Forwarder.Forward(Receiver.Payload("a"))
-      forwarder ! Forwarder.Forward(Receiver.Payload("b"))
-      forwarder ! Forwarder.Forward(Receiver.Payload("c"))
-      forwarder ! Forwarder.Forward(Receiver.Payload("d"))
-      forwarder ! Forwarder.Forward(Receiver.Payload("e"))
+      forwarderRef ! Forwarder.Forward(Receiver.Message("a"))
+      forwarderRef ! Forwarder.Forward(Receiver.Message("b"))
+      forwarderRef ! Forwarder.Forward(Receiver.Message("c"))
+      forwarderRef ! Forwarder.Forward(Receiver.Message("d"))
+      forwarderRef ! Forwarder.Forward(Receiver.Message("e"))
 
       // 1が送信された
       outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(1L)
@@ -106,24 +110,25 @@ class AtLeastOnceSpec extends ScalaTestWithActorTestKit(AtLeastOnceSpec.config) 
       innerReceiverProbe.expectNoMessage() // ドロップされるので届かない
 
       // forwarderを停止
-      testKit.stop(forwarder)
+      testKit.stop(forwarderRef)
 
-      // で、forwarder再起動後も継続的に再送される
-      val sender2 = spawn(Forwarder(id, receiverRef, 2.second))
+      // forwarderが再起動した後も、継続的に再送される
+      val senderRef2 = spawn(Forwarder(id, receiverRef, 2.second))
 
       // 再送3
       outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(3L)
       outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(4L)
       innerReceiverProbe.expectNoMessage() // ドロップされるので届かない
 
-      sender2 ! Forwarder.Forward(Receiver.Payload("f"))
+      // 新たにfを送信する
+      senderRef2 ! Forwarder.Forward(Receiver.Message("f"))
 
       // 6が送信された
       outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(6L)
       // 6が受信された(本来であれば届かないで3,4,5が届くまでstashしたほうがいい)
       innerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(6L)
 
-      testKit.stop(sender2)
+      testKit.stop(senderRef2)
     }
 
   }

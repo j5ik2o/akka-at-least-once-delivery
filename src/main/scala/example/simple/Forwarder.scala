@@ -13,30 +13,48 @@ import java.util.UUID
 import scala.concurrent.duration.FiniteDuration
 
 object Forwarder {
-  // --- Commands
+  // --- コマンド
   sealed trait Command
 
-  final case class Forward(payload: Receiver.Payload) extends Command with CborSerializable
+  // メッセージを送信するコマンド
+  final case class Forward(payload: Receiver.Message) extends Command with CborSerializable
 
+  // Receiverからの返信を示すコマンド
   private final case class WrappedReply(confirm: Receiver.Reply) extends Command
 
+  // メッセージを再送信するコマンド
   private final case class ForwardRetry(deliveryId: Long, attempt: Int) extends Command
 
+  // Receiverが停止したことを通知するコマンド
   private case object ReceiverTerminated extends Command
 
-  // --- Events
+  // --- イベント
   sealed trait Event extends CborSerializable
 
   // メッセージを送信したイベント
-  final case class MessageSent(payload: Receiver.Payload) extends Event
+  final case class MessageSent(payload: Receiver.Message) extends Event
 
   // 応答メッセージがきたイベント
   final case class MessageReplied(deliveryId: Long) extends Event
 
+  // フォワーダーの状態
   private final case class State(
       lastDeliveryId: Long,
-      pendingPayloads: Map[String, Receiver.Payload]
-  ) extends CborSerializable
+      pendingPayloads: Map[String, Receiver.Message]
+  ) extends CborSerializable {
+
+    def append(payload: Receiver.Message): State = {
+      val nextDeliveryId = lastDeliveryId + 1
+      copy(
+        lastDeliveryId = nextDeliveryId,
+        pendingPayloads = pendingPayloads + (nextDeliveryId.toString -> payload)
+      )
+    }
+
+    def remove(deliveryId: Long): State =
+      copy(pendingPayloads = this.pendingPayloads - deliveryId.toString)
+
+  }
 
   // ビヘイビアを返すファクトリ
   def apply(
@@ -48,6 +66,7 @@ object Forwarder {
       Behaviors.withTimers { timers =>
         // 宛先が停止したときにメッセージを受ける
         context.watchWith(receiverRef, ReceiverTerminated)
+
         // 永続化アクターのビヘイビアを定義
         EventSourcedBehavior[Command, Event, State](
           PersistenceId.ofUniqueId(id.toString),                        // ID
@@ -82,6 +101,7 @@ object Forwarder {
           // タイマーを仕掛ける。タイムアウト時はRedeliverを送信する
           timers.startSingleTimer(deliveryId, ForwardRetry(deliveryId, 2), forwardTimeout)
         }
+
       // タイムアウトせずに返信がきたとき(正常系)
       case WrappedReply(Receiver.Reply(deliveryId)) =>
         context.log.info("Confirmed #{} from {}", deliveryId, receiverRef)
@@ -89,6 +109,7 @@ object Forwarder {
         timers.cancel(deliveryId)
         // 送信完了イベントを永続化
         Effect.persist(MessageReplied(deliveryId))
+
       // タイムアウトして返信がないとき(異常系)
       case ForwardRetry(deliveryId, attempt) =>
         context.log.infoN("Redeliver #{}, attempt {}, to {}", deliveryId, attempt, receiverRef)
@@ -110,15 +131,11 @@ object Forwarder {
       // 送信開始イベントのとき
       case MessageSent(payload) =>
         // ステートにペンディングエントリを追加
-        val nextDeliveryId = state.lastDeliveryId + 1
-        state.copy(
-          lastDeliveryId = nextDeliveryId,
-          pendingPayloads = state.pendingPayloads + (nextDeliveryId.toString -> payload)
-        )
+        state.append(payload)
       // 送信完了イベントのとき
       case MessageReplied(deliveryId) =>
         // ステートからペンディングエントリを削除
-        state.copy(pendingPayloads = state.pendingPayloads - deliveryId.toString)
+        state.remove(deliveryId)
     }
   }
 
