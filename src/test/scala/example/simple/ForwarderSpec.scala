@@ -34,11 +34,13 @@ class ForwarderSpec extends ScalaTestWithActorTestKit(ForwarderSpec.config) with
       val receiverRef   = spawn(Behaviors.monitor(receiverProbe.ref, Receiver()))
       val forwarderRef  = spawn(Forwarder(UUID.randomUUID(), receiverRef, 2.seconds))
 
+      // メッセージの転送(1回目)
       forwarderRef ! Forwarder.Forward(Receiver.Message("a"))
       val message1 = receiverProbe.expectMessageType[Receiver.Request]
       message1.deliveryId should ===(1L)
       message1.payload should ===(Receiver.Message("a"))
 
+      // メッセージの転送(2回目)
       forwarderRef ! Forwarder.Forward(Receiver.Message("b"))
       val message2 = receiverProbe.expectMessageType[Receiver.Request]
       message2.deliveryId should ===(2L)
