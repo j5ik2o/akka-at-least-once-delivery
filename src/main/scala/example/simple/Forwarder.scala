@@ -5,7 +5,7 @@ package example.simple
 import akka.actor.typed.scaladsl.{ ActorContext, Behaviors, LoggerOps, TimerScheduler }
 import akka.actor.typed.{ ActorRef, Behavior }
 import akka.persistence.typed.scaladsl.EventSourcedBehavior.{ CommandHandler, EventHandler }
-import akka.persistence.typed.scaladsl.{ Effect, EventSourcedBehavior, RetentionCriteria }
+import akka.persistence.typed.scaladsl.{ Effect, EventSourcedBehavior }
 import akka.persistence.typed.{ PersistenceId, RecoveryCompleted }
 import example.CborSerializable
 
@@ -43,6 +43,7 @@ object Forwarder {
       pendingPayloads: Map[String, Receiver.Message]
   ) extends CborSerializable {
 
+    // ペンディングを追加する
     def append(payload: Receiver.Message): State = {
       val nextDeliveryId = lastDeliveryId + 1
       copy(
@@ -51,8 +52,9 @@ object Forwarder {
       )
     }
 
+    // ペンディングを削除する
     def remove(deliveryId: Long): State =
-      copy(pendingPayloads = this.pendingPayloads - deliveryId.toString)
+      copy(pendingPayloads = pendingPayloads - deliveryId.toString)
 
   }
 
@@ -76,7 +78,7 @@ object Forwarder {
         ).receiveSignal { case (state, RecoveryCompleted) =>
           // アクターのリプレイが完了したとき、ペンディングが残っていたら再送を行う
           redeliverPendingMessages(context, timers, state, receiverRef, forwardTimeout)
-        }.withRetention(RetentionCriteria.snapshotEvery(100, 3).withDeleteEventsOnSnapshot)
+        } // .withRetention(RetentionCriteria.snapshotEvery(100, 3).withDeleteEventsOnSnapshot)
       }
     }
   }
@@ -87,7 +89,7 @@ object Forwarder {
       receiverRef: ActorRef[Receiver.Command],
       forwardTimeout: FiniteDuration
   ): CommandHandler[Command, Event, State] = { (state, command) =>
-    def confirmAdapter: ActorRef[Receiver.Reply] =
+    val confirmAdapter: ActorRef[Receiver.Reply] =
       context.messageAdapter[Receiver.Reply](WrappedReply.apply)
     command match {
       // 宛先にメッセージを送信するとき
@@ -120,6 +122,8 @@ object Forwarder {
         // タイマーを仕掛ける。試行回数を追加する
         timers.startSingleTimer(deliveryId, ForwardRetry(deliveryId, attempt + 1), forwardTimeout)
         Effect.none
+
+      // Receiverが終了した
       case ReceiverTerminated =>
         context.log.warn("Receiver {} terminated", receiverRef)
         Effect.stop()
@@ -146,14 +150,14 @@ object Forwarder {
       receiverRef: ActorRef[Receiver.Command],
       forwardTimeout: FiniteDuration
   ): Unit = {
-    def confirmAdapter: ActorRef[Receiver.Reply] =
+    val confirmAdapter: ActorRef[Receiver.Reply] =
       context.messageAdapter[Receiver.Reply](WrappedReply.apply)
     context.log.info("--- started: RecoveryCompleted ---")
     // 状態を復元してペンディング中のすべてのメッセージを再送信する。
     state.pendingPayloads.toList
       .sortBy { case (deliveryId, _) => deliveryId }
       .foreach { case (id, payload) =>
-        val deliveryId = id.toLong // workaround for CborSerializaton issue of Map[Long, _]
+        val deliveryId = id.toLong
         context.log.info("receiveSignal: Deliver #{} to {} after recovery", deliveryId, receiverRef)
         receiverRef ! Receiver.Request(deliveryId, payload, confirmAdapter)
         timers.startSingleTimer(deliveryId, ForwardRetry(deliveryId, 2), forwardTimeout)
