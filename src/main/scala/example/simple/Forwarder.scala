@@ -50,10 +50,10 @@ object Forwarder {
         context.watchWith(receiverRef, ReceiverTerminated)
         // 永続化アクターのビヘイビアを定義
         EventSourcedBehavior[Command, Event, State](
-          PersistenceId.ofUniqueId(id.toString),
-          emptyState = State(0L, Map.empty),
-          commandHandler = commandHandler(context, timers, receiverRef, forwardTimeout),
-          eventHandler = eventHandler
+          PersistenceId.ofUniqueId(id.toString),                        // ID
+          emptyState = State(0L, Map.empty),                            // 初期状態
+          commandHandler(context, timers, receiverRef, forwardTimeout), // コマンドハンドラ
+          eventHandler                                                  // イベントハンドラ
         ).receiveSignal { case (state, RecoveryCompleted) =>
           // アクターのリプレイが完了したとき、ペンディングが残っていたら再送を行う
           redeliverPendingMessages(context, timers, state, receiverRef, forwardTimeout)

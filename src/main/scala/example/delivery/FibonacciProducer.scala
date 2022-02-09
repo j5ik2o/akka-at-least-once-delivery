@@ -29,7 +29,7 @@ object FibonacciProducer {
 
       // プロデューサコントローラを生成する
       val producerId = s"fibonacci-${UUID.randomUUID()}"
-      val producerController: ActorRef[ProducerController.Command[FibonacciConsumer.Command]] = context.spawn(
+      val producerController = context.spawn(
         ProducerController[FibonacciConsumer.Command](producerId, durableQueueBehavior),
         "producerController"
       )

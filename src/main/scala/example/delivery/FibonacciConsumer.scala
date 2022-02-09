@@ -18,8 +18,7 @@ object FibonacciConsumer {
   def apply(): Behavior[Command] = {
     Behaviors.setup { context =>
       // コンシューマコントローラを生成する
-      val consumerController: ActorRef[ConsumerController.Command[FibonacciConsumer.Command]] =
-        context.spawn(ConsumerController[FibonacciConsumer.Command](), "consumerController")
+      val consumerController = context.spawn(ConsumerController[FibonacciConsumer.Command](), "consumerController")
       // メッセージアダプタを生成する
       val deliveryAdapter =
         context.messageAdapter[ConsumerController.Delivery[FibonacciConsumer.Command]](WrappedDelivery)
