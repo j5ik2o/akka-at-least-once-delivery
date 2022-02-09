@@ -52,7 +52,7 @@ class ForwarderSpec extends ScalaTestWithActorTestKit(ForwarderSpec.config) with
       testKit.stop(forwarderRef)
     }
 
-    "ロストしたメッセージを再送できる。ただし受信できない" in {
+    "ロストしたメッセージを再送できる。ただし受信者には到達しない" in {
       // 受信側の準備
       // フィルターの外側のプローブ
       val outerReceiverProbe = createTestProbe[Receiver.Command]()
@@ -127,7 +127,7 @@ class ForwarderSpec extends ScalaTestWithActorTestKit(ForwarderSpec.config) with
 
       // 6が送信された
       outerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(6L)
-      // 6が受信された(本来であれば届かないで3,4,5が届くまでstashしたほうがいい)
+      // 6が受信された
       innerReceiverProbe.expectMessageType[Receiver.Request].deliveryId should ===(6L)
 
       testKit.stop(senderRef2)

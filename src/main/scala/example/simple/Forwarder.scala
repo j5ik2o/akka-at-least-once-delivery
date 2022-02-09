@@ -1,7 +1,5 @@
 package example.simple
 
-// https://gist.github.com/patriknw/514bae62134050f24ca7af95ee977e54
-
 import akka.actor.typed.scaladsl.{ ActorContext, Behaviors, LoggerOps, TimerScheduler }
 import akka.actor.typed.{ ActorRef, Behavior }
 import akka.persistence.typed.scaladsl.EventSourcedBehavior.{ CommandHandler, EventHandler }
@@ -98,6 +96,7 @@ object Forwarder {
         Effect.persist(MessageSent(payload)).thenRun { newState =>
           val deliveryId = newState.lastDeliveryId
           context.log.info("Deliver #{} to {}", deliveryId, receiverRef)
+
           // 宛先のアクターへメッセージを送信する(tell)
           receiverRef ! Receiver.Request(deliveryId, payload, confirmAdapter)
           // タイマーを仕掛ける。タイムアウト時はRedeliverを送信する
@@ -107,8 +106,10 @@ object Forwarder {
       // タイムアウトせずに返信がきたとき(正常系)
       case WrappedReply(Receiver.Reply(deliveryId)) =>
         context.log.info("Confirmed #{} from {}", deliveryId, receiverRef)
+
         // タイマーを停止する
         timers.cancel(deliveryId)
+
         // 送信完了イベントを永続化
         Effect.persist(MessageReplied(deliveryId))
 
@@ -117,10 +118,12 @@ object Forwarder {
         context.log.infoN("Redeliver #{}, attempt {}, to {}", deliveryId, attempt, receiverRef)
         // 状態からペイロードを取得
         val payload = state.pendingPayloads(deliveryId.toString)
+
         // 再送する
         receiverRef ! Receiver.Request(deliveryId, payload, confirmAdapter)
         // タイマーを仕掛ける。試行回数を追加する
         timers.startSingleTimer(deliveryId, ForwardRetry(deliveryId, attempt + 1), forwardTimeout)
+
         Effect.none
 
       // Receiverが終了した
