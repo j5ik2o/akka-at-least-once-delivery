@@ -10,6 +10,7 @@ import example.saga.OrderActor.CreateOrderSucceeded
 
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.ThreadLocalRandom
 import scala.concurrent.duration.FiniteDuration
 
 object OrderActor {
@@ -48,7 +49,7 @@ object OrderSaga {
   case class ExecuteFailed(requestId: UUID)    extends ExecuteReply
 
   private case class WrappedCreateOrderReply(msg: OrderActor.CreateOrderReply) extends Command
-  private case class CreateOrderRetry(id: UUID, attempt: Int)                  extends Command
+  private case class CreateOrderRetry(id: UUID, retryCount: Int)               extends Command
 
   // --- イベント
   sealed trait Event extends CborSerializable
@@ -65,13 +66,31 @@ object OrderSaga {
   case class OrderDetail(itemId: UUID, num: Int)
   case class JustState(pendingOrders: Map[UUID, OrderDetail], replyTo: ActorRef[ExecuteReply]) extends State
 
+  private def calculateDelay(
+      restartCount: Int,
+      minBackoff: FiniteDuration,
+      maxBackoff: FiniteDuration,
+      randomFactor: Double
+  ): FiniteDuration = {
+    val rnd = 1.0 + ThreadLocalRandom.current().nextDouble() * randomFactor
+    if (restartCount >= 30) // Duration overflow protection (> 100 years)
+      maxBackoff
+    else
+      maxBackoff.min(minBackoff * math.pow(2, restartCount.toDouble)) * rnd match {
+        case f: FiniteDuration => f
+        case _                 => maxBackoff
+      }
+  }
+
   def apply(
       id: UUID,
       orderActorRef: ActorRef[OrderActor.Command],
       paymentActorRef: ActorRef[PaymentActor.Command],
       inventoryActorRef: ActorRef[InventoryActor.Command],
       deliveryActorRef: ActorRef[DeliveryActor.Command],
-      requestTimeout: FiniteDuration
+      minBackoff: FiniteDuration,
+      maxBackoff: FiniteDuration,
+      randomFactor: Double
   ): Behavior[Command] = {
     Behaviors.setup { context =>
       Behaviors.withTimers { timers =>
@@ -85,7 +104,9 @@ object OrderSaga {
             paymentActorRef,
             inventoryActorRef,
             deliveryActorRef,
-            requestTimeout
+            minBackoff,
+            maxBackoff,
+            randomFactor
           ),           // コマンドハンドラ
           eventHandler // イベントハンドラ
         )
@@ -100,7 +121,9 @@ object OrderSaga {
       paymentActorRef: ActorRef[PaymentActor.Command],
       inventoryActorRef: ActorRef[InventoryActor.Command],
       deliveryActorRef: ActorRef[DeliveryActor.Command],
-      requestTimeout: FiniteDuration
+      minBackoff: FiniteDuration,
+      maxBackoff: FiniteDuration,
+      randomFactor: Double
   ): CommandHandler[Command, Event, State] = { (state, command) =>
     (state, command) match {
       // プロセスの開始
@@ -109,7 +132,11 @@ object OrderSaga {
           context.messageAdapter[OrderActor.CreateOrderReply](WrappedCreateOrderReply.apply)
         Effect.persist(OrderSaga.CreateOrderSent(id, itemId, num, replyTo)).thenRun { _ =>
           orderActorRef ! OrderActor.CreateOrder(UUID.randomUUID(), itemId, num, Instant.now(), confirmAdapter)
-          timers.startSingleTimer(id, CreateOrderRetry(id, 2), requestTimeout)
+          timers.startSingleTimer(
+            id,
+            CreateOrderRetry(id, 1),
+            calculateDelay(1, minBackoff, maxBackoff, randomFactor)
+          )
         }
       // OrderActorから返事が来ない場合
       case (JustState(pendingOrders, _), CreateOrderRetry(requestId, attempt)) =>
@@ -124,8 +151,11 @@ object OrderSaga {
           Instant.now(),
           confirmAdapter
         )
-        // TODO: Exponential Backoff
-        timers.startSingleTimer(requestId, CreateOrderRetry(requestId, attempt + 1), requestTimeout)
+        timers.startSingleTimer(
+          requestId,
+          CreateOrderRetry(requestId, attempt + 1),
+          calculateDelay(attempt + 1, minBackoff, maxBackoff, randomFactor)
+        )
         Effect.none
       // OrderActorが成功した場合
       case (JustState(_, _), WrappedCreateOrderReply(OrderActor.CreateOrderSucceeded(requestId))) =>
