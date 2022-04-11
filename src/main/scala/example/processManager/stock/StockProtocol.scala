@@ -11,6 +11,7 @@ object StockProtocol {
   }
 
   final case class SecureStock(id: UUID, stockId: StockId, stockItems: StockItems, replyTo: ActorRef[SecureStockReply])
+      extends CommandRequest
   sealed trait SecureStockReply {
     def id: UUID
     def commandRequestId: UUID

@@ -16,7 +16,7 @@ object OrderEvents {
       id: UUID,
       orderId: OrderId,
       orderItems: OrderItems,
-      replyTo: ActorRef[OrderProtocol.CommandRequest],
+      replyTo: ActorRef[OrderProtocol.CreateOrderReply],
       occurredAt: Instant
   ) extends Event
 

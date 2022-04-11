@@ -18,4 +18,4 @@ lazy val root = (project in file("."))
       "com.typesafe.akka" %% "akka-actor-testkit-typed"   % akkaVersion % Test,
       "org.scalatest"     %% "scalatest"                  % "3.1.0"     % Test
     )
-  )
+  ).settings(kotlinLib("stdlib"), kotlinVersion := "1.6.20")
