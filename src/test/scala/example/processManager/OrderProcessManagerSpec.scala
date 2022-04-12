@@ -53,7 +53,7 @@ object OrderProcessManagerSpec {
   final val DEFAULT_STOCK_HANDLER: MessageHandler[StockProtocol.CommandRequest] = { (ctx, message) =>
     message match {
       case message: StockProtocol.SecureStock =>
-        message.replyTo.tell(StockProtocol.SecureStockSucceeded(UUID.randomUUID(), message.id, message.stockId))
+        message.replyTo ! StockProtocol.SecureStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
       case _ => ctx.log.error("message: {}", message)
     }
   }
@@ -61,7 +61,7 @@ object OrderProcessManagerSpec {
   final val DEFAULT_BILLING_HANDLER: MessageHandler[BillingProtocol.CommandRequest] = { (ctx, message) =>
     message match {
       case message: BillingProtocol.CreateBilling =>
-        message.replyTo.tell(BillingProtocol.CreateBillingSucceeded(UUID.randomUUID(), message.id, message.billingId))
+        message.replyTo ! BillingProtocol.CreateBillingSucceeded(UUID.randomUUID(), message.id, message.billingId)
       case _ => ctx.log.error("message: {}", message)
     }
   }
@@ -191,35 +191,31 @@ class OrderProcessManagerSpec extends ScalaTestWithActorTestKit(OrderProcessMana
           stockHandler = { (ctx, message) =>
             message match {
               case message: StockProtocol.SecureStock =>
-                message.replyTo.tell(StockProtocol.SecureStockSucceeded(UUID.randomUUID(), message.id, message.stockId))
+                message.replyTo ! StockProtocol.SecureStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
               case message: StockProtocol.CancelStock =>
-                message.replyTo.tell(StockProtocol.CancelStockSucceeded(UUID.randomUUID(), message.id, message.stockId))
+                message.replyTo ! StockProtocol.CancelStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
               case _ => ctx.log.error("message: {}", message)
             }
           },
           billingHandler = { (ctx, message) =>
             message match {
               case message: BillingProtocol.CreateBilling =>
-                message.replyTo.tell(
-                  BillingProtocol.CreateBillingFailed(
-                    UUID.randomUUID(),
-                    message.id,
-                    message.billingId,
-                    BillingError.CreditError(BillingId())
-                  )
+                message.replyTo ! BillingProtocol.CreateBillingFailed(
+                  UUID.randomUUID(),
+                  message.id,
+                  message.billingId,
+                  BillingError.CreditError(BillingId())
                 )
               case _ => ctx.log.error("message: $message")
             }
           }
         )
 
-        orderProcessManagerRefResult.sagaRef.tell(
-          OrderProtocol.CreateOrder(
-            UUID.randomUUID(),
-            orderId,
-            orderItems,
-            createOrderReplyTestProbe.ref
-          )
+        orderProcessManagerRefResult.sagaRef ! OrderProtocol.CreateOrder(
+          UUID.randomUUID(),
+          orderId,
+          orderItems,
+          createOrderReplyTestProbe.ref
         )
 
         val reply = createOrderReplyTestProbe.expectMessageType[OrderProtocol.CreateOrderFailed](
@@ -244,15 +240,13 @@ class OrderProcessManagerSpec extends ScalaTestWithActorTestKit(OrderProcessMana
           stockHandler = { (ctx, message) =>
             message match {
               case message: StockProtocol.SecureStock =>
-                message.replyTo.tell(StockProtocol.SecureStockSucceeded(UUID.randomUUID(), message.id, message.stockId))
+                message.replyTo ! StockProtocol.SecureStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
               case message: StockProtocol.CancelStock =>
                 if (counter.incrementAndGet() <= 3) {
                   ctx.log.info("counter = $counter")
                   throw new Exception("異常が発生しました: counter = $counter")
                 } else {
-                  message.replyTo.tell(
-                    StockProtocol.CancelStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
-                  )
+                  message.replyTo ! StockProtocol.CancelStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
                 }
               case _ => ctx.log.error("message: {}", message)
             }
@@ -260,26 +254,22 @@ class OrderProcessManagerSpec extends ScalaTestWithActorTestKit(OrderProcessMana
           billingHandler = { (ctx, message) =>
             message match {
               case message: BillingProtocol.CreateBilling =>
-                message.replyTo.tell(
-                  BillingProtocol.CreateBillingFailed(
-                    UUID.randomUUID(),
-                    message.id,
-                    message.billingId,
-                    BillingError.CreditError(BillingId())
-                  )
+                message.replyTo ! BillingProtocol.CreateBillingFailed(
+                  UUID.randomUUID(),
+                  message.id,
+                  message.billingId,
+                  BillingError.CreditError(BillingId())
                 )
               case _ => ctx.log.error("message: $message")
             }
           }
         )
 
-        orderProcessManagerRefResult.sagaRef.tell(
-          OrderProtocol.CreateOrder(
-            UUID.randomUUID(),
-            orderId,
-            orderItems,
-            createOrderReplyTestProbe.ref
-          )
+        orderProcessManagerRefResult.sagaRef ! OrderProtocol.CreateOrder(
+          UUID.randomUUID(),
+          orderId,
+          orderItems,
+          createOrderReplyTestProbe.ref
         )
 
         val reply = createOrderReplyTestProbe.expectMessageType[OrderProtocol.CreateOrderFailed](
@@ -300,13 +290,11 @@ class OrderProcessManagerSpec extends ScalaTestWithActorTestKit(OrderProcessMana
 
       val orderProcessManagerRefResult0 = newOrderProcessManagerRef(orderId, BACKOFF_SETTINGS)
 
-      orderProcessManagerRefResult0.sagaRef.tell(
-        OrderProtocol.CreateOrder(
-          UUID.randomUUID(),
-          orderId,
-          orderItems,
-          createOrderReplyTestProbe.ref
-        )
+      orderProcessManagerRefResult0.sagaRef ! OrderProtocol.CreateOrder(
+        UUID.randomUUID(),
+        orderId,
+        orderItems,
+        createOrderReplyTestProbe.ref
       )
 
       // SecureStockを受け取ったら、OrderSagaを停止し再開する
