@@ -1,7 +1,7 @@
 package example.processManager
 
 import akka.actor.typed.scaladsl.{ ActorContext, Behaviors, TimerScheduler }
-import akka.actor.typed.{ ActorRef, Behavior }
+import akka.actor.typed.{ ActorRef, Behavior, Signal }
 import akka.persistence.typed.scaladsl.EventSourcedBehavior.{ CommandHandler, EventHandler }
 import akka.persistence.typed.scaladsl.{ Effect, EventSourcedBehavior }
 import akka.persistence.typed.{ PersistenceId, RecoveryCompleted }
@@ -23,7 +23,26 @@ import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 import scala.concurrent.duration.FiniteDuration
 
-object OrderActor {
+object OrderProcessManager {
+
+  def apply(
+      id: OrderId,
+      backoffSettings: BackoffSettings,
+      stockActorRef: ActorRef[StockProtocol.CommandRequest],
+      billingActorRef: ActorRef[BillingProtocol.CommandRequest]
+  ): Behavior[OrderProtocol.CommandRequest] = {
+    Behaviors.setup { ctx =>
+      val maxAttempt = maxAttemptCount(backoffSettings.minBackoff, backoffSettings.maxBackoff)
+      Behaviors.withTimers { timers =>
+        EventSourcedBehavior(
+          PersistenceId.ofUniqueId(id.asString),
+          emptyState = OrderState.Empty(id),
+          commandHandler = commandHandler(ctx, timers, backoffSettings, maxAttempt, stockActorRef, billingActorRef),
+          eventHandler = eventHandler(ctx)
+        ).receiveSignal(signalHandler(ctx, timers, id, backoffSettings, maxAttempt, stockActorRef, billingActorRef))
+      }
+    }
+  }
 
   private def maxAttemptCount(
       minBackoff: FiniteDuration,
@@ -50,46 +69,6 @@ object OrderActor {
       }
   }
 
-  def apply(
-      id: OrderId,
-      backoffSettings: BackoffSettings,
-      stockActorRef: ActorRef[StockProtocol.CommandRequest],
-      billingActorRef: ActorRef[BillingProtocol.CommandRequest]
-  ): Behavior[OrderProtocol.CommandRequest] = {
-    Behaviors.setup { ctx =>
-      val maxAttempt = maxAttemptCount(backoffSettings.minBackoff, backoffSettings.maxBackoff)
-      Behaviors.withTimers { timers =>
-        EventSourcedBehavior(
-          PersistenceId.ofUniqueId(id.asString),
-          emptyState = OrderState.Empty(id),
-          commandHandler = commandHandler(ctx, timers, backoffSettings, maxAttempt, stockActorRef, billingActorRef),
-          eventHandler = eventHandler(ctx)
-        ).receiveSignal {
-          case (s: StockSecuring, RecoveryCompleted) =>
-            secureStock(ctx, timers, backoffSettings, id, stockActorRef)(
-              UUID.randomUUID(),
-              s.stockItems,
-              s.replyTo,
-              Attempt(2, maxAttempt)
-            )
-          case (s: BillingCreating, RecoveryCompleted) =>
-            createBilling(ctx, timers, backoffSettings, id, billingActorRef)(
-              UUID.randomUUID(),
-              s.billingItems,
-              s.replyTo,
-              Attempt(2, maxAttempt)
-            )
-          case (s: OrderRecovering, RecoveryCompleted) =>
-            cancelStock(ctx, timers, backoffSettings, id, stockActorRef)(
-              UUID.randomUUID(),
-              s.stockItems,
-              s.replyTo,
-              Attempt(2, maxAttempt)
-            )
-        }
-      }
-    }
-  }
   private def convertToStockItems(orderItems: OrderItems): StockItems = {
     def newId() = StockItemId()
     val head    = StockItem(newId(), orderItems.head.itemId, orderItems.head.itemQuantity)
@@ -302,5 +281,37 @@ object OrderActor {
       case (s: OrderRecovering, OrderRollbacked(_, orderId, _)) if s.orderId == orderId =>
         s
     }
+  }
+
+  private def signalHandler(
+      ctx: ActorContext[OrderProtocol.CommandRequest],
+      timers: TimerScheduler[OrderProtocol.CommandRequest],
+      id: OrderId,
+      backoffSettings: BackoffSettings,
+      maxAttempt: Int,
+      stockActorRef: ActorRef[StockProtocol.CommandRequest],
+      billingActorRef: ActorRef[BillingProtocol.CommandRequest]
+  ): PartialFunction[(OrderState, Signal), Unit] = {
+    case (s: StockSecuring, RecoveryCompleted) =>
+      secureStock(ctx, timers, backoffSettings, id, stockActorRef)(
+        UUID.randomUUID(),
+        s.stockItems,
+        s.replyTo,
+        Attempt(2, maxAttempt)
+      )
+    case (s: BillingCreating, RecoveryCompleted) =>
+      createBilling(ctx, timers, backoffSettings, id, billingActorRef)(
+        UUID.randomUUID(),
+        s.billingItems,
+        s.replyTo,
+        Attempt(2, maxAttempt)
+      )
+    case (s: OrderRecovering, RecoveryCompleted) =>
+      cancelStock(ctx, timers, backoffSettings, id, stockActorRef)(
+        UUID.randomUUID(),
+        s.stockItems,
+        s.replyTo,
+        Attempt(2, maxAttempt)
+      )
   }
 }
