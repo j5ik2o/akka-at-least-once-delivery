@@ -1,5 +1,9 @@
 package example.processManager
 
-final case class OrderId(value: Int) {
+import example.CborSerializable
+
+import java.util.UUID
+
+final case class OrderId(value: UUID = UUID.randomUUID()) extends CborSerializable {
   def asString: String = value.toString
 }

@@ -1,6 +1,8 @@
 package example.processManager.stock
 
-sealed trait StockError {
+import example.CborSerializable
+
+sealed trait StockError extends CborSerializable {
   def stockId: StockId
 }
 

@@ -1,5 +1,7 @@
 package example.processManager
 
+import example.CborSerializable
+
 import java.util.concurrent.atomic.AtomicInteger
 
 final case class Attempt(initial: Int, max: Int) extends CborSerializable {

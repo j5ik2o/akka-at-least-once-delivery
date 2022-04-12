@@ -1,6 +1,7 @@
 package example.processManager
 
 import akka.actor.typed.ActorRef
+import example.CborSerializable
 
 import java.time.Instant
 import java.util.UUID

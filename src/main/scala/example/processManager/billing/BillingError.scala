@@ -1,6 +1,8 @@
 package example.processManager.billing
 
-sealed trait BillingError {
+import example.CborSerializable
+
+sealed trait BillingError extends CborSerializable {
   def billingId: BillingId
 }
 

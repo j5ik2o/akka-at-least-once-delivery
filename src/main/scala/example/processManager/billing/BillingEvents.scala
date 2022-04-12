@@ -1,6 +1,6 @@
 package example.processManager.billing
 
-import example.processManager.CborSerializable
+import example.CborSerializable
 
 import java.time.Instant
 import java.util.UUID
