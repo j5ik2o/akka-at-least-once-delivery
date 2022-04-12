@@ -52,7 +52,10 @@ object OrderProcessManager {
       stockActorRef: ActorRef[StockProtocol.CommandRequest],
       billingActorRef: ActorRef[BillingProtocol.CommandRequest]
   ): CommandHandler[OrderProtocol.CommandRequest, OrderEvents.Event, OrderState] = { (state, event) =>
-    val pf = empty.orElse(stockSecuring).orElse(billingCreating).orElse(orderRecovering)
+    val pf = emptyCommandHandler
+      .orElse(stockSecuringCommandHandler)
+      .orElse(billingCreatingCommandHandler)
+      .orElse(orderRecoveringCommandHandler)
     pf(state, event)
   }
 
@@ -116,7 +119,7 @@ object OrderProcessManager {
     StockItems(head, tail: _*)
   }
 
-  private def empty(implicit
+  private def emptyCommandHandler(implicit
       ctx: ActorContext[OrderProtocol.CommandRequest],
       timers: TimerScheduler[OrderProtocol.CommandRequest],
       backoffSettings: BackoffSettings,
@@ -136,7 +139,7 @@ object OrderProcessManager {
       }
   }
 
-  private def stockSecuring(implicit
+  private def stockSecuringCommandHandler(implicit
       ctx: ActorContext[OrderProtocol.CommandRequest],
       timers: TimerScheduler[OrderProtocol.CommandRequest],
       backoffSettings: BackoffSettings,
@@ -176,7 +179,7 @@ object OrderProcessManager {
       }
   }
 
-  private def billingCreating(implicit
+  private def billingCreatingCommandHandler(implicit
       ctx: ActorContext[OrderProtocol.CommandRequest],
       timers: TimerScheduler[OrderProtocol.CommandRequest],
       backoffSettings: BackoffSettings,
@@ -220,7 +223,7 @@ object OrderProcessManager {
       Effect.none
   }
 
-  private def orderRecovering(implicit
+  private def orderRecoveringCommandHandler(implicit
       ctx: ActorContext[OrderProtocol.CommandRequest],
       timers: TimerScheduler[OrderProtocol.CommandRequest],
       backoffSettings: BackoffSettings,
