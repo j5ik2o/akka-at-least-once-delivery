@@ -32,42 +32,82 @@ object OrderProcessManager {
       billingActorRef: ActorRef[BillingProtocol.CommandRequest]
   ): Behavior[OrderProtocol.CommandRequest] = {
     Behaviors.setup { ctx =>
-      val maxAttempt = maxAttemptCount(backoffSettings.minBackoff, backoffSettings.maxBackoff)
+      val maxAttempt = maxAttemptCount(backoffSettings)
       Behaviors.withTimers { timers =>
         EventSourcedBehavior(
           PersistenceId.ofUniqueId(id.asString),
           emptyState = OrderState.Empty(id),
           commandHandler = commandHandler(ctx, timers, backoffSettings, maxAttempt, stockActorRef, billingActorRef),
           eventHandler = eventHandler(ctx)
-        ).receiveSignal(signalHandler(ctx, timers, id, backoffSettings, maxAttempt, stockActorRef, billingActorRef))
+        ).receiveSignal(signalHandler(ctx, timers, backoffSettings, maxAttempt, stockActorRef, billingActorRef))
       }
     }
   }
 
-  private def maxAttemptCount(
-      minBackoff: FiniteDuration,
-      maxBackoff: FiniteDuration
-  ): Int = {
-    require(maxBackoff < minBackoff * math.pow(2.0, 30), "maxBackoffが大きすぎます")
-    LazyList
-      .from(1).map { n =>
-        (n, minBackoff * math.pow(2.0, n))
-      }.find(_._2 > maxBackoff).map(_._1).getOrElse(0)
+  private def commandHandler(implicit
+      ctx: ActorContext[OrderProtocol.CommandRequest],
+      timers: TimerScheduler[OrderProtocol.CommandRequest],
+      backoffSettings: BackoffSettings,
+      maxAttempt: Int,
+      stockActorRef: ActorRef[StockProtocol.CommandRequest],
+      billingActorRef: ActorRef[BillingProtocol.CommandRequest]
+  ): CommandHandler[OrderProtocol.CommandRequest, OrderEvents.Event, OrderState] = { (state, event) =>
+    val pf = empty.orElse(stockSecuring).orElse(billingCreating).orElse(orderRecovering)
+    pf(state, event)
   }
 
-  private def exponentialBackOff(
-      restartCount: Attempt,
-      backoffSettings: BackoffSettings
-  ): FiniteDuration = {
-    val rnd = 1.0 + ThreadLocalRandom.current().nextDouble() * backoffSettings.randomFactor
-    if (restartCount.toInt >= 30) // Duration overflow protection (> 100 years)
-      backoffSettings.maxBackoff
-    else
-      backoffSettings.maxBackoff.min(backoffSettings.minBackoff * math.pow(2, restartCount.toDouble)) * rnd match {
-        case f: FiniteDuration => f
-        case _                 => backoffSettings.maxBackoff
-      }
+  private def eventHandler(
+      ctx: ActorContext[OrderProtocol.CommandRequest]
+  ): EventHandler[OrderState, OrderEvents.Event] = { (state, event) =>
+    (state, event) match {
+      case (s: Empty, OrderBegan(_, orderId, orderItems, replyTo, _)) if s.orderId == orderId =>
+        s.stockSecuring(orderItems, replyTo)
+      case (s: StockSecuring, StockSecured(_, orderId, _)) if s.orderId == orderId =>
+        s.billingCreating
+      case (s: BillingCreating, OrderCommitted(_, orderId, _)) if s.orderId == orderId =>
+        s
+      case (s: BillingCreating, BillingFailed(_, orderId, _)) if s.orderId == orderId =>
+        s.recovering
+      case (s: OrderRecovering, OrderRollbacked(_, orderId, _)) if s.orderId == orderId =>
+        s
+    }
   }
+
+  private def signalHandler(implicit
+      ctx: ActorContext[OrderProtocol.CommandRequest],
+      timers: TimerScheduler[OrderProtocol.CommandRequest],
+      backoffSettings: BackoffSettings,
+      maxAttempt: Int,
+      stockActorRef: ActorRef[StockProtocol.CommandRequest],
+      billingActorRef: ActorRef[BillingProtocol.CommandRequest]
+  ): PartialFunction[(OrderState, Signal), Unit] = {
+    case (s: StockSecuring, RecoveryCompleted) =>
+      secureStock(
+        s.orderId,
+        UUID.randomUUID(),
+        s.stockItems,
+        s.replyTo,
+        Attempt(2, maxAttempt)
+      )
+    case (s: BillingCreating, RecoveryCompleted) =>
+      createBilling(
+        s.orderId,
+        UUID.randomUUID(),
+        s.billingItems,
+        s.replyTo,
+        Attempt(2, maxAttempt)
+      )
+    case (s: OrderRecovering, RecoveryCompleted) =>
+      cancelStock(
+        s.orderId,
+        UUID.randomUUID(),
+        s.stockItems,
+        s.replyTo,
+        Attempt(2, maxAttempt)
+      )
+  }
+
+  type PartialCommandHandler[Command, Event, State] = PartialFunction[(State, Command), Effect[Event, State]]
 
   private def convertToStockItems(orderItems: OrderItems): StockItems = {
     def newId() = StockItemId()
@@ -76,118 +116,154 @@ object OrderProcessManager {
     StockItems(head, tail: _*)
   }
 
-  private def commandHandler(
+  private def empty(implicit
+      ctx: ActorContext[OrderProtocol.CommandRequest],
+      timers: TimerScheduler[OrderProtocol.CommandRequest],
+      backoffSettings: BackoffSettings,
+      maxAttempt: Int,
+      stockActorRef: ActorRef[StockProtocol.CommandRequest]
+  ): PartialCommandHandler[OrderProtocol.CommandRequest, OrderEvents.Event, OrderState] = {
+    case (s: Empty, CreateOrder(id, orderId, orderItems, replyTo)) if s.orderId == orderId =>
+      Effect.persist(OrderBegan(UUID.randomUUID(), orderId, orderItems, replyTo, Instant.now())).thenRun { _ =>
+        val stockItems = convertToStockItems(orderItems)
+        secureStock(
+          s.orderId,
+          id,
+          stockItems,
+          replyTo,
+          Attempt(2, maxAttempt)
+        )
+      }
+  }
+
+  private def stockSecuring(implicit
       ctx: ActorContext[OrderProtocol.CommandRequest],
       timers: TimerScheduler[OrderProtocol.CommandRequest],
       backoffSettings: BackoffSettings,
       maxAttempt: Int,
       stockActorRef: ActorRef[StockProtocol.CommandRequest],
       billingActorRef: ActorRef[BillingProtocol.CommandRequest]
-  ): CommandHandler[OrderProtocol.CommandRequest, OrderEvents.Event, OrderState] = { (state, command) =>
-    (state, command) match {
-      case (s: Empty, CreateOrder(id, orderId, orderItems, replyTo)) if s.orderId == orderId =>
-        Effect.persist(OrderBegan(UUID.randomUUID(), orderId, orderItems, replyTo, Instant.now())).thenRun { s =>
-          val stockItems = convertToStockItems(orderItems)
-          secureStock(ctx, timers, backoffSettings, orderId, stockActorRef)(
-            id,
-            stockItems,
-            replyTo,
-            Attempt(2, maxAttempt)
-          )
-        }
-      case (s: StockSecuring, RetrySecureStock(_, commandRequestId, orderId, stockItems, replyTo, attempt))
-          if s.orderId == orderId =>
-        timers.cancel(commandRequestId)
-        secureStock(ctx, timers, backoffSettings, orderId, stockActorRef)(
-          commandRequestId,
-          stockItems,
-          replyTo,
-          attempt.increment
-        )
-        Effect.none
-      case (s: StockSecuring, WrappedSecureStockReply(_, commandRequestId, orderId, msg, replyTo)) =>
-        timers.cancel(commandRequestId)
-        msg match {
-          case SecureStockSucceeded(_, _, _) =>
-            Effect.persist(StockSecured(UUID.randomUUID(), orderId, Instant.now())).thenRun { _ =>
-              createBilling(ctx, timers, backoffSettings, orderId, billingActorRef)(
-                UUID.randomUUID(),
-                s.billingItems,
-                replyTo,
-                Attempt(2, maxAttempt)
-              )
-            }
-          case SecureStockFailed(_, commandRequestId, _, error) =>
-            Effect.persist(OrderRollbacked(UUID.randomUUID(), orderId, Instant.now())).thenReply(replyTo) { _ =>
-              CreateOrderFailed(UUID.randomUUID(), commandRequestId, orderId, SecureStockError(orderId))
-            }
-        }
-      case (_: BillingCreating, RetryCreateBilling(_, commandRequestId, orderId, billingItems, replyTo, attempt)) =>
-        timers.cancel(commandRequestId)
-        createBilling(ctx, timers, backoffSettings, orderId, billingActorRef)(
-          commandRequestId,
-          billingItems,
-          replyTo,
-          attempt.increment
-        )
-        Effect.none
-      case (s: BillingCreating, WrappedCreateBillingReply(_, commandRequestId, orderId, msg, replyTo)) =>
-        timers.cancel(commandRequestId)
-        msg match {
-          case CreateBillingSucceeded(_, commandRequestId, _) =>
-            Effect.persist(OrderCommitted(UUID.randomUUID(), orderId, Instant.now())).thenReply(replyTo) { _ =>
-              CreateOrderSucceeded(UUID.randomUUID(), commandRequestId, orderId)
-            }
-          case CreateBillingFailed(_, _, _, _) =>
-            Effect.persist(BillingFailed(UUID.randomUUID(), orderId, Instant.now())).thenRun { _ =>
-              cancelStock(ctx, timers, backoffSettings, orderId, stockActorRef)(
-                UUID.randomUUID(),
-                s.stockItems,
-                s.replyTo,
-                Attempt(2, maxAttempt)
-              )
-            }
-        }
-      // 行き違いで返信がきた場合
-      case (_: BillingCreating, cmd: WrappedSecureStockReply) =>
-        ctx.log.warn("Illegal command: {}", cmd)
-        Effect.none
-      case (_: OrderRecovering, RetryCancelStock(_, commandRequestId, orderId, stockItems, replyTo, attempt)) =>
-        timers.cancel(commandRequestId)
-        cancelStock(ctx, timers, backoffSettings, orderId, stockActorRef)(
-          commandRequestId,
-          stockItems,
-          replyTo,
-          attempt.increment
-        )
-        Effect.none
-      case (_: OrderRecovering, WrappedCancelStockReply(_, commandRequestId, orderId, msg, replyTo)) =>
-        timers.cancel(commandRequestId)
-        Effect.persist(OrderRollbacked(UUID.randomUUID(), orderId, Instant.now())).thenReply(replyTo) { _ =>
-          msg match {
-            case CancelStockSucceeded(_, _, _) =>
-              CreateOrderFailed(UUID.randomUUID(), commandRequestId, orderId, OrderError.BillingError(orderId))
-            case CancelStockFailed(_, commandRequestId, _, _) =>
-              CreateOrderFailed(UUID.randomUUID(), commandRequestId, orderId, OrderError.SecureStockError(orderId))
+  ): PartialCommandHandler[OrderProtocol.CommandRequest, OrderEvents.Event, OrderState] = {
+    case (s: StockSecuring, RetrySecureStock(_, commandRequestId, orderId, stockItems, replyTo, attempt))
+        if s.orderId == orderId =>
+      timers.cancel(commandRequestId)
+      secureStock(
+        s.orderId,
+        commandRequestId,
+        stockItems,
+        replyTo,
+        attempt.increment
+      )
+      Effect.none
+    case (s: StockSecuring, WrappedSecureStockReply(_, commandRequestId, orderId, msg, replyTo))
+        if s.orderId == orderId =>
+      timers.cancel(commandRequestId)
+      msg match {
+        case SecureStockSucceeded(_, _, _) =>
+          Effect.persist(StockSecured(UUID.randomUUID(), orderId, Instant.now())).thenRun { _ =>
+            createBilling(
+              s.orderId,
+              UUID.randomUUID(),
+              s.billingItems,
+              replyTo,
+              Attempt(2, maxAttempt)
+            )
           }
-        }
-      case (_: OrderRecovering, cmd: WrappedCreateBillingReply) =>
-        ctx.log.warn("Illegal command: {}", cmd)
-        Effect.none
-    }
+        case SecureStockFailed(_, commandRequestId, _, error) =>
+          Effect.persist(OrderRollbacked(UUID.randomUUID(), orderId, Instant.now())).thenReply(replyTo) { _ =>
+            CreateOrderFailed(UUID.randomUUID(), commandRequestId, orderId, SecureStockError(orderId))
+          }
+      }
   }
 
-  private def cancelStock(
+  private def billingCreating(implicit
       ctx: ActorContext[OrderProtocol.CommandRequest],
       timers: TimerScheduler[OrderProtocol.CommandRequest],
       backoffSettings: BackoffSettings,
-      orderId: OrderId,
+      maxAttempt: Int,
+      stockActorRef: ActorRef[StockProtocol.CommandRequest],
+      billingActorRef: ActorRef[BillingProtocol.CommandRequest]
+  ): PartialCommandHandler[OrderProtocol.CommandRequest, OrderEvents.Event, OrderState] = {
+    case (s: BillingCreating, RetryCreateBilling(_, commandRequestId, orderId, billingItems, replyTo, attempt))
+        if s.orderId == orderId =>
+      timers.cancel(commandRequestId)
+      createBilling(
+        s.orderId,
+        commandRequestId,
+        billingItems,
+        replyTo,
+        attempt.increment
+      )
+      Effect.none
+    case (s: BillingCreating, WrappedCreateBillingReply(_, commandRequestId, orderId, msg, replyTo))
+        if s.orderId == orderId =>
+      timers.cancel(commandRequestId)
+      msg match {
+        case CreateBillingSucceeded(_, commandRequestId, _) =>
+          Effect.persist(OrderCommitted(UUID.randomUUID(), orderId, Instant.now())).thenReply(replyTo) { _ =>
+            CreateOrderSucceeded(UUID.randomUUID(), commandRequestId, orderId)
+          }
+        case CreateBillingFailed(_, _, _, _) =>
+          Effect.persist(BillingFailed(UUID.randomUUID(), orderId, Instant.now())).thenRun { _ =>
+            cancelStock(
+              orderId,
+              UUID.randomUUID(),
+              s.stockItems,
+              s.replyTo,
+              Attempt(2, maxAttempt)
+            )
+          }
+      }
+    // 行き違いで返信がきた場合
+    case (s: BillingCreating, cmd: WrappedSecureStockReply) if s.orderId == cmd.orderId =>
+      ctx.log.warn("Illegal command: {}", cmd)
+      Effect.none
+  }
+
+  private def orderRecovering(implicit
+      ctx: ActorContext[OrderProtocol.CommandRequest],
+      timers: TimerScheduler[OrderProtocol.CommandRequest],
+      backoffSettings: BackoffSettings,
       stockActorRef: ActorRef[StockProtocol.CommandRequest]
-  )(
+  ): PartialCommandHandler[OrderProtocol.CommandRequest, OrderEvents.Event, OrderState] = {
+    case (s: OrderRecovering, RetryCancelStock(_, commandRequestId, orderId, stockItems, replyTo, attempt))
+        if s.orderId == orderId =>
+      timers.cancel(commandRequestId)
+      cancelStock(
+        s.orderId,
+        commandRequestId,
+        stockItems,
+        replyTo,
+        attempt.increment
+      )
+      Effect.none
+    case (s: OrderRecovering, WrappedCancelStockReply(_, commandRequestId, orderId, msg, replyTo))
+        if s.orderId == orderId =>
+      timers.cancel(commandRequestId)
+      Effect.persist(OrderRollbacked(UUID.randomUUID(), orderId, Instant.now())).thenReply(replyTo) { _ =>
+        msg match {
+          case CancelStockSucceeded(_, _, _) =>
+            CreateOrderFailed(UUID.randomUUID(), commandRequestId, orderId, OrderError.BillingError(orderId))
+          case CancelStockFailed(_, commandRequestId, _, _) =>
+            CreateOrderFailed(UUID.randomUUID(), commandRequestId, orderId, OrderError.SecureStockError(orderId))
+        }
+      }
+    case (s: OrderRecovering, cmd: WrappedCreateBillingReply) if s.orderId == cmd.orderId =>
+      ctx.log.warn("Illegal command: {}", cmd)
+      Effect.none
+  }
+
+  private def cancelStock(
+      orderId: OrderId,
       commandRequestId: UUID,
       stockItems: StockItems,
       replyTo: ActorRef[CreateOrderReply],
       attempt: Attempt
+  )(implicit
+      ctx: ActorContext[OrderProtocol.CommandRequest],
+      timers: TimerScheduler[OrderProtocol.CommandRequest],
+      backoffSettings: BackoffSettings,
+      stockActorRef: ActorRef[StockProtocol.CommandRequest]
   ): Unit = {
     val confirmAdapter = ctx.messageAdapter[CancelStockReply] { msg =>
       OrderProtocol.WrappedCancelStockReply(
@@ -207,16 +283,16 @@ object OrderProcessManager {
   }
 
   private def secureStock(
-      ctx: ActorContext[OrderProtocol.CommandRequest],
-      timers: TimerScheduler[OrderProtocol.CommandRequest],
-      backoffSettings: BackoffSettings,
       orderId: OrderId,
-      stockActorRef: ActorRef[StockProtocol.CommandRequest]
-  )(
       commandRequestId: UUID,
       stockItems: StockItems,
       replyTo: ActorRef[CreateOrderReply],
       attempt: Attempt
+  )(implicit
+      ctx: ActorContext[OrderProtocol.CommandRequest],
+      timers: TimerScheduler[OrderProtocol.CommandRequest],
+      backoffSettings: BackoffSettings,
+      stockActorRef: ActorRef[StockProtocol.CommandRequest]
   ): Unit = {
     val confirmAdapter =
       ctx.messageAdapter[SecureStockReply] { msg =>
@@ -237,16 +313,16 @@ object OrderProcessManager {
   }
 
   private def createBilling(
-      ctx: ActorContext[OrderProtocol.CommandRequest],
-      timers: TimerScheduler[OrderProtocol.CommandRequest],
-      backoffSettings: BackoffSettings,
       orderId: OrderId,
-      billingActorRef: ActorRef[BillingProtocol.CommandRequest]
-  )(
       commandRequestId: UUID,
       billingItems: BillingItems,
       replyTo: ActorRef[OrderProtocol.CreateOrderReply],
       attempt: Attempt
+  )(implicit
+      ctx: ActorContext[OrderProtocol.CommandRequest],
+      timers: TimerScheduler[OrderProtocol.CommandRequest],
+      backoffSettings: BackoffSettings,
+      billingActorRef: ActorRef[BillingProtocol.CommandRequest]
   ): Unit = {
     val confirmAdapter =
       ctx.messageAdapter[CreateBillingReply] { msg =>
@@ -266,52 +342,30 @@ object OrderProcessManager {
     )
   }
 
-  private def eventHandler(
-      ctx: ActorContext[OrderProtocol.CommandRequest]
-  ): EventHandler[OrderState, OrderEvents.Event] = { (state, event) =>
-    (state, event) match {
-      case (s: Empty, OrderBegan(_, orderId, orderItems, replyTo, _)) if s.orderId == orderId =>
-        s.stockSecuring(orderItems, replyTo)
-      case (s: StockSecuring, StockSecured(_, orderId, _)) if s.orderId == orderId =>
-        s.billingCreating
-      case (s: BillingCreating, OrderCommitted(_, orderId, _)) if s.orderId == orderId =>
-        s
-      case (s: BillingCreating, BillingFailed(_, orderId, _)) if s.orderId == orderId =>
-        s.recovering
-      case (s: OrderRecovering, OrderRollbacked(_, orderId, _)) if s.orderId == orderId =>
-        s
-    }
+  private def maxAttemptCount(
+      backoffSettings: BackoffSettings
+  ): Int = {
+    import backoffSettings._
+    require(maxBackoff < minBackoff * math.pow(2.0, 30), "maxBackoffが大きすぎます")
+    LazyList
+      .from(1).map { n =>
+        (n, minBackoff * math.pow(2.0, n))
+      }.find(_._2 > maxBackoff).map(_._1).getOrElse(0)
   }
 
-  private def signalHandler(
-      ctx: ActorContext[OrderProtocol.CommandRequest],
-      timers: TimerScheduler[OrderProtocol.CommandRequest],
-      id: OrderId,
-      backoffSettings: BackoffSettings,
-      maxAttempt: Int,
-      stockActorRef: ActorRef[StockProtocol.CommandRequest],
-      billingActorRef: ActorRef[BillingProtocol.CommandRequest]
-  ): PartialFunction[(OrderState, Signal), Unit] = {
-    case (s: StockSecuring, RecoveryCompleted) =>
-      secureStock(ctx, timers, backoffSettings, id, stockActorRef)(
-        UUID.randomUUID(),
-        s.stockItems,
-        s.replyTo,
-        Attempt(2, maxAttempt)
-      )
-    case (s: BillingCreating, RecoveryCompleted) =>
-      createBilling(ctx, timers, backoffSettings, id, billingActorRef)(
-        UUID.randomUUID(),
-        s.billingItems,
-        s.replyTo,
-        Attempt(2, maxAttempt)
-      )
-    case (s: OrderRecovering, RecoveryCompleted) =>
-      cancelStock(ctx, timers, backoffSettings, id, stockActorRef)(
-        UUID.randomUUID(),
-        s.stockItems,
-        s.replyTo,
-        Attempt(2, maxAttempt)
-      )
+  private def exponentialBackOff(
+      restartCount: Attempt,
+      backoffSettings: BackoffSettings
+  ): FiniteDuration = {
+    import backoffSettings._
+    val rnd = 1.0 + ThreadLocalRandom.current().nextDouble() * randomFactor
+    if (restartCount.toInt >= 30) // Duration overflow protection (> 100 years)
+      maxBackoff
+    else
+      maxBackoff.min(minBackoff * math.pow(2, restartCount.toDouble)) * rnd match {
+        case f: FiniteDuration => f
+        case _                 => maxBackoff
+      }
   }
+
 }
