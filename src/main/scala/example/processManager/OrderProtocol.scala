@@ -22,7 +22,7 @@ object OrderProtocol {
     def commandRequestId: UUID
   }
   case class CreateOrderSucceeded(id: UUID, commandRequestId: UUID, orderId: OrderId) extends CreateOrderReply
-  case class CreateOrderFailed(id: UUID, commandRequestId: UUID, orderId: OrderId, error: SecureStockError)
+  case class CreateOrderFailed(id: UUID, commandRequestId: UUID, orderId: OrderId, error: OrderError)
       extends CreateOrderReply
 
   case class RetrySecureStock(

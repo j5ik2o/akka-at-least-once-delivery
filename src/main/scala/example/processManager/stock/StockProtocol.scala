@@ -22,12 +22,13 @@ object StockProtocol {
       extends SecureStockReply
 
   final case class CancelStock(id: UUID, stockId: StockId, stockItems: StockItems, replyTo: ActorRef[CancelStockReply])
+      extends CommandRequest
   sealed trait CancelStockReply {
     def id: UUID
     def commandRequestId: UUID
     def stockId: StockId
   }
-  final case class CancelStockSucceeded(id: UUID, commandRequestId: UUID, stockId: StockId) extends SecureStockReply
+  final case class CancelStockSucceeded(id: UUID, commandRequestId: UUID, stockId: StockId) extends CancelStockReply
   final case class CancelStockFailed(id: UUID, commandRequestId: UUID, stockId: StockId, error: StockError)
-      extends SecureStockReply
+      extends CancelStockReply
 }
