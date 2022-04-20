@@ -112,7 +112,7 @@ object OrderProcessManager {
 
   type PartialCommandHandler[Command, Event, State] = PartialFunction[(State, Command), Effect[Event, State]]
 
-  private def convertToStockItems(orderItems: OrderItems): StockItems = {
+  def convertToStockItems(orderItems: OrderItems): StockItems = {
     def newId() = StockItemId()
     val head    = StockItem(newId(), orderItems.head.itemId, orderItems.head.itemQuantity)
     val tail    = orderItems.tail.map { it => StockItem(newId(), it.itemId, it.itemQuantity) }
@@ -285,7 +285,7 @@ object OrderProcessManager {
     )
   }
 
-  private def secureStock(
+  def secureStock(
       orderId: OrderId,
       commandRequestId: UUID,
       stockItems: StockItems,
@@ -315,7 +315,7 @@ object OrderProcessManager {
     )
   }
 
-  private def createBilling(
+  def createBilling(
       orderId: OrderId,
       commandRequestId: UUID,
       billingItems: BillingItems,
@@ -345,7 +345,7 @@ object OrderProcessManager {
     )
   }
 
-  private def maxAttemptCount(
+  def maxAttemptCount(
       backoffSettings: BackoffSettings
   ): Int = {
     import backoffSettings._
