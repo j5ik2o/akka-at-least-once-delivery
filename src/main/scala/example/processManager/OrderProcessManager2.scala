@@ -1,6 +1,6 @@
 package example.processManager
 
-import akka.actor.typed.scaladsl.{ ActorContext, Behaviors, TimerScheduler }
+import akka.actor.typed.scaladsl.{ ActorContext, Behaviors, StashBuffer, TimerScheduler }
 import akka.actor.typed.{ ActorRef, Behavior }
 import akka.persistence.typed.scaladsl.{ Effect, EventSourcedBehavior }
 import akka.persistence.typed.{ PersistenceId, RecoveryCompleted }
@@ -231,8 +231,10 @@ object OrderProcessManager2 {
             }
         }
 
-        Behaviors.withStash(32) { stashBuffer =>
-          Behaviors.receiveMessage {
+        def replayHandler(
+            stashBuffer: StashBuffer[OrderProtocol.CommandRequest]
+        ): Behaviors.Receive[CommandRequest] =
+          Behaviors.receiveMessagePartial {
             case StateRecoveryCompleted(_, _, _, s: OrderState.Empty) =>
               stashBuffer.unstashAll(empty(s))
             case StateRecoveryCompleted(_, _, _, s: OrderState.StockSecuring) =>
@@ -266,6 +268,9 @@ object OrderProcessManager2 {
               stashBuffer.stash(msg)
               Behaviors.same
           }
+
+        Behaviors.withStash(32) { stashBuffer =>
+          replayHandler(stashBuffer)
         }
       }
     }
