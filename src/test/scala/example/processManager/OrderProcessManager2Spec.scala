@@ -78,7 +78,7 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
       val orderId                      = OrderId()
       val orderItems                   = newOrderItems()
       val createOrderReplyTestProbe    = testKit.createTestProbe[CreateOrderReply]()
-      val orderProcessManagerRefResult = newOrderProcessManagerRef(orderId, BACKOFF_SETTINGS)
+      val orderProcessManagerRefResult = newOrderProcessManager2Ref(orderId, BACKOFF_SETTINGS)
 
       orderProcessManagerRefResult.processManagerRef ! OrderProtocol.CreateOrder(
         UUID.randomUUID(),
@@ -97,26 +97,25 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
     "StockActorRefが故障しても再送することで注文することができる" in {
       val orderId                   = OrderId()
       val orderItems                = newOrderItems()
-      val createOrderReplyTestProbe = testKit.createTestProbe[OrderProtocol.CreateOrderReply]
+      val createOrderReplyTestProbe = testKit.createTestProbe[OrderProtocol.CreateOrderReply]()
 
       val counter = new AtomicInteger(0)
-      val orderProcessManagerRefResult =
-        newOrderProcessManagerRef(
-          orderId,
-          BACKOFF_SETTINGS,
-          stockHandler = { (ctx, message) =>
-            message match {
-              case message: StockProtocol.SecureStock =>
-                if (counter.incrementAndGet() <= 3) {
-                  ctx.log.info("counter = $counter")
-                  throw new Exception("異常が発生しました: counter = $counter")
-                } else {
-                  message.replyTo ! StockProtocol.SecureStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
-                }
-              case _ => ctx.log.error("message: $message")
-            }
+      val orderProcessManagerRefResult = newOrderProcessManager2Ref(
+        orderId,
+        BACKOFF_SETTINGS,
+        stockHandler = { (ctx, message) =>
+          message match {
+            case message: StockProtocol.SecureStock =>
+              if (counter.incrementAndGet() <= 3) {
+                ctx.log.info(s"counter = $counter")
+                throw new Exception(s"異常が発生しました: counter = $counter")
+              } else {
+                message.replyTo ! StockProtocol.SecureStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
+              }
+            case _ => ctx.log.error(s"message: $message")
           }
-        )
+        }
+      )
 
       orderProcessManagerRefResult.processManagerRef ! OrderProtocol.CreateOrder(
         UUID.randomUUID(),
@@ -137,30 +136,29 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
     "BillingActorRefが故障してもリトライすることで注文することができる" in {
       val orderId                   = OrderId()
       val orderItems                = newOrderItems()
-      val createOrderReplyTestProbe = testKit.createTestProbe[OrderProtocol.CreateOrderReply]
+      val createOrderReplyTestProbe = testKit.createTestProbe[OrderProtocol.CreateOrderReply]()
 
       val counter = new AtomicInteger(0)
-      val orderProcessManagerRefResult =
-        newOrderProcessManagerRef(
-          orderId,
-          BACKOFF_SETTINGS,
-          billingHandler = { (ctx, message) =>
-            message match {
-              case message: BillingProtocol.CreateBilling =>
-                if (counter.incrementAndGet() <= 3) {
-                  ctx.log.info("counter = $counter")
-                  throw new Exception("異常が発生しました: counter = $counter")
-                } else {
-                  message.replyTo ! BillingProtocol.CreateBillingSucceeded(
-                    UUID.randomUUID(),
-                    message.id,
-                    message.billingId
-                  )
-                }
-              case _ => ctx.log.error("message: $message")
-            }
+      val orderProcessManagerRefResult = newOrderProcessManager2Ref(
+        orderId,
+        BACKOFF_SETTINGS,
+        billingHandler = { (ctx, message) =>
+          message match {
+            case message: BillingProtocol.CreateBilling =>
+              if (counter.incrementAndGet() <= 3) {
+                ctx.log.info(s"counter = $counter")
+                throw new Exception(s"異常が発生しました: counter = $counter")
+              } else {
+                message.replyTo ! BillingProtocol.CreateBillingSucceeded(
+                  UUID.randomUUID(),
+                  message.id,
+                  message.billingId
+                )
+              }
+            case _ => ctx.log.error(s"message: $message")
           }
-        )
+        }
+      )
 
       orderProcessManagerRefResult.processManagerRef !
       OrderProtocol.CreateOrder(
@@ -183,9 +181,9 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
       "BillingActorRefへCancelStockを送りクライアントにCreateOrderFailedを返す" in {
         val orderId                   = OrderId()
         val orderItems                = newOrderItems()
-        val createOrderReplyTestProbe = testKit.createTestProbe[OrderProtocol.CreateOrderReply]
+        val createOrderReplyTestProbe = testKit.createTestProbe[OrderProtocol.CreateOrderReply]()
 
-        val orderProcessManagerRefResult = newOrderProcessManagerRef(
+        val orderProcessManagerRefResult = newOrderProcessManager2Ref(
           orderId,
           BACKOFF_SETTINGS,
           stockHandler = { (ctx, message) =>
@@ -194,7 +192,7 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
                 message.replyTo ! StockProtocol.SecureStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
               case message: StockProtocol.CancelStock =>
                 message.replyTo ! StockProtocol.CancelStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
-              case _ => ctx.log.error("message: {}", message)
+              case _ => ctx.log.error(s"message: $message")
             }
           },
           billingHandler = { (ctx, message) =>
@@ -206,7 +204,7 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
                   message.billingId,
                   BillingError.CreditError(BillingId())
                 )
-              case _ => ctx.log.error("message: $message")
+              case _ => ctx.log.error(s"message: $message")
             }
           }
         )
@@ -231,10 +229,10 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
       "BillingRefへのCancelStockをリトライしクライアントにCreateOrderFailedを返す" in {
         val orderId                   = OrderId()
         val orderItems                = newOrderItems()
-        val createOrderReplyTestProbe = testKit.createTestProbe[OrderProtocol.CreateOrderReply]
+        val createOrderReplyTestProbe = testKit.createTestProbe[OrderProtocol.CreateOrderReply]()
 
         val counter = new AtomicInteger(0)
-        val orderProcessManagerRefResult = newOrderProcessManagerRef(
+        val orderProcessManagerRefResult = newOrderProcessManager2Ref(
           orderId,
           BACKOFF_SETTINGS,
           stockHandler = { (ctx, message) =>
@@ -243,12 +241,12 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
                 message.replyTo ! StockProtocol.SecureStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
               case message: StockProtocol.CancelStock =>
                 if (counter.incrementAndGet() <= 3) {
-                  ctx.log.info("counter = $counter")
-                  throw new Exception("異常が発生しました: counter = $counter")
+                  ctx.log.info(s"counter = $counter")
+                  throw new Exception(s"異常が発生しました: counter = $counter")
                 } else {
                   message.replyTo ! StockProtocol.CancelStockSucceeded(UUID.randomUUID(), message.id, message.stockId)
                 }
-              case _ => ctx.log.error("message: {}", message)
+              case _ => ctx.log.error(s"message: $message")
             }
           },
           billingHandler = { (ctx, message) =>
@@ -260,7 +258,7 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
                   message.billingId,
                   BillingError.CreditError(BillingId())
                 )
-              case _ => ctx.log.error("message: $message")
+              case _ => ctx.log.error(s"message: $message")
             }
           }
         )
@@ -286,9 +284,9 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
     "中断しても続きから再開し注文することができる" in {
       val orderId                   = OrderId()
       val orderItems                = newOrderItems()
-      val createOrderReplyTestProbe = testKit.createTestProbe[OrderProtocol.CreateOrderReply]
+      val createOrderReplyTestProbe = testKit.createTestProbe[OrderProtocol.CreateOrderReply]()
 
-      val orderProcessManagerRefResult0 = newOrderProcessManagerRef(orderId, BACKOFF_SETTINGS)
+      val orderProcessManagerRefResult0 = newOrderProcessManager2Ref(orderId, BACKOFF_SETTINGS)
 
       orderProcessManagerRefResult0.processManagerRef ! OrderProtocol.CreateOrder(
         UUID.randomUUID(),
@@ -300,7 +298,7 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
       // SecureStockを受け取ったら、OrderProcessManagerを停止し再開する
       orderProcessManagerRefResult0.stockProbe.expectMessageType[StockProtocol.SecureStock]
       testKit.stop(orderProcessManagerRefResult0.processManagerRef)
-      val orderProcessManagerRefResult1 = newOrderProcessManagerRef(orderId, BACKOFF_SETTINGS)
+      val orderProcessManagerRefResult1 = newOrderProcessManager2Ref(orderId, BACKOFF_SETTINGS)
 
       val reply = createOrderReplyTestProbe.expectMessageType[OrderProtocol.CreateOrderSucceeded]
       assert(orderId == reply.orderId)
@@ -348,7 +346,7 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
     )
   }
 
-  private def newOrderProcessManagerRef(
+  private def newOrderProcessManager2Ref(
       orderId: OrderId,
       backoffSettings: BackoffSettings,
       stockHandler: MessageHandler[StockProtocol.CommandRequest] = DEFAULT_STOCK_HANDLER,

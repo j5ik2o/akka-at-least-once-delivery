@@ -5,7 +5,7 @@ import akka.actor.typed.{ ActorRef, Behavior }
 import akka.persistence.typed.scaladsl.{ Effect, EventSourcedBehavior }
 import akka.persistence.typed.{ PersistenceId, RecoveryCompleted }
 import example.processManager.OrderEvents._
-import example.processManager.OrderProcessManager.{ convertToStockItems, createBilling, maxAttemptCount, secureStock }
+import example.processManager.OrderProcessManager1.{ convertToStockItems, createBilling, maxAttemptCount, secureStock }
 import example.processManager.OrderProtocol._
 import example.processManager.billing.BillingProtocol.{ CreateBillingFailed, CreateBillingSucceeded }
 import example.processManager.billing._
@@ -113,7 +113,7 @@ object OrderProcessManager2 {
             }
           }
 
-        val empty: Behavior[OrderProtocol.CommandRequest] = Behaviors.receiveMessage {
+        def empty(s: OrderState.Empty): Behavior[OrderProtocol.CommandRequest] = Behaviors.receiveMessage {
           case CreateOrder(id, orderId, orderItems, replyTo) =>
             persistEvent(id, orderId, OrderBegan(UUID.randomUUID(), orderId, orderItems, replyTo, Instant.now())) {
               case state: OrderState.StockSecuring =>
@@ -132,7 +132,7 @@ object OrderProcessManager2 {
         Behaviors.withStash(32) { stashBuffer =>
           Behaviors.receiveMessage {
             case StateRecoveryCompleted(_, _, _, s: OrderState.Empty) =>
-              stashBuffer.unstashAll(empty)
+              stashBuffer.unstashAll(empty(s))
             case StateRecoveryCompleted(_, _, _, s: OrderState.StockSecuring) =>
               stashBuffer.unstashAll(stockSecuring(s))
             case StateRecoveryCompleted(_, _, _, s: OrderState.BillingCreating) =>

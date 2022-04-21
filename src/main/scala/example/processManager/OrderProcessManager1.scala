@@ -23,7 +23,7 @@ import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 import scala.concurrent.duration.FiniteDuration
 
-object OrderProcessManager {
+object OrderProcessManager1 {
 
   def apply(
       id: OrderId,
