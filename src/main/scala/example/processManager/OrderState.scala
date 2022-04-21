@@ -4,7 +4,20 @@ import akka.actor.typed.ActorRef
 import example.processManager.billing.{ BillingItem, BillingItemId, BillingItems }
 import example.processManager.stock.{ StockItem, StockItemId, StockItems }
 
-sealed trait OrderState
+sealed trait OrderState {
+  def applyEvent(event: OrderEvents.Event): OrderState = {
+    (this, event) match {
+      case (s: OrderState.Empty, OrderEvents.OrderBegan(_, _, orderItems, replyTo, _)) =>
+        s.stockSecuring(orderItems, replyTo)
+      case (s: OrderState.StockSecuring, OrderEvents.StockSecured(_, _, _)) =>
+        s.billingCreating
+      case (s: OrderState.BillingCreating, OrderEvents.BillingFailed(_, _, _)) =>
+        s.recovering
+      case (s, _) =>
+        s
+    }
+  }
+}
 
 object OrderState {
 

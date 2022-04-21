@@ -82,4 +82,7 @@ object OrderProtocol {
       orderId: OrderId,
       message: PersistReply
   ) extends CommandRequest
+
+  case class StateRecoveryCompleted(id: UUID, commandRequestId: UUID, orderId: OrderId, state: OrderState)
+      extends CommandRequest
 }

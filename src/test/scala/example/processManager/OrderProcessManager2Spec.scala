@@ -5,7 +5,7 @@ import akka.actor.typed.scaladsl.{ ActorContext, Behaviors }
 import akka.actor.typed.{ ActorRef, SupervisorStrategy }
 import com.typesafe.config.{ Config, ConfigFactory }
 import example.CborSerializable
-import example.processManager.OrderProcessManagerSpec._
+import example.processManager.OrderProcessManager2Spec._
 import example.processManager.OrderProtocol.CreateOrderReply
 import example.processManager.billing.{ BillingError, BillingId, BillingProtocol }
 import example.processManager.stock.StockProtocol
@@ -15,7 +15,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 
-private case class OrderProcessManagerRefResult(
+private case class OrderProcessManager2RefResult(
     processManagerRef: ActorRef[OrderProtocol.CommandRequest],
     stockRef: ActorRef[StockProtocol.CommandRequest],
     stockProbe: TestProbe[StockProtocol.CommandRequest],
@@ -23,7 +23,7 @@ private case class OrderProcessManagerRefResult(
     billingProbe: TestProbe[BillingProtocol.CommandRequest]
 )
 
-object OrderProcessManagerSpec {
+object OrderProcessManager2Spec {
   val config: Config = ConfigFactory.parseString(s"""
     akka.persistence.journal.plugin = "akka.persistence.journal.inmem"
     akka.persistence.journal.inmem.test-serialization = on
@@ -72,7 +72,7 @@ object OrderProcessManagerSpec {
   final val BACKOFF_SETTINGS            = BackoffSettings(MIN_BACKOFF, MAX_BACKOFF, RANDOM_FACTOR)
 }
 
-class OrderProcessManagerSpec extends ScalaTestWithActorTestKit(OrderProcessManagerSpec.config) with AnyFreeSpecLike {
+class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessManager2Spec.config) with AnyFreeSpecLike {
   "OrderProcessManager" - {
     "注文することができる" in {
       val orderId                      = OrderId()
@@ -353,13 +353,13 @@ class OrderProcessManagerSpec extends ScalaTestWithActorTestKit(OrderProcessMana
       backoffSettings: BackoffSettings,
       stockHandler: MessageHandler[StockProtocol.CommandRequest] = DEFAULT_STOCK_HANDLER,
       billingHandler: MessageHandler[BillingProtocol.CommandRequest] = DEFAULT_BILLING_HANDLER
-  ): OrderProcessManagerRefResult = {
+  ): OrderProcessManager2RefResult = {
     val stockRefWithProbe   = newStockActorRef(stockHandler)
     val billingRefWithProbe = newBillingActorRef(billingHandler)
 
     val processManagerRef =
       testKit.spawn(
-        OrderProcessManager(
+        OrderProcessManager2(
           orderId,
           backoffSettings,
           stockRefWithProbe._1,
@@ -367,7 +367,7 @@ class OrderProcessManagerSpec extends ScalaTestWithActorTestKit(OrderProcessMana
         )
       )
 
-    OrderProcessManagerRefResult(
+    OrderProcessManager2RefResult(
       processManagerRef,
       stockRefWithProbe._1,
       stockRefWithProbe._2,
