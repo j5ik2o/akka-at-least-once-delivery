@@ -19,14 +19,13 @@ import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 import scala.concurrent.duration.FiniteDuration
 
-object OrderProcessManager2 {
-
+object OrderEffect {
   case class Persist(event: OrderEvents.Event, replyTo: ActorRef[PersistReply])
   sealed trait PersistReply
   case class PersistSucceeded(state: OrderState) extends PersistReply
   case object PersistFailed                      extends PersistReply
 
-  private def persistBehavior(id: OrderId, parentRef: ActorRef[OrderProtocol.CommandRequest]): Behavior[Persist] =
+  def persistBehavior(id: OrderId, parentRef: ActorRef[OrderProtocol.CommandRequest]): Behavior[Persist] =
     Behaviors.setup { ctx =>
       EventSourcedBehavior(
         PersistenceId.ofUniqueId(id.asString),
@@ -47,13 +46,13 @@ object OrderProcessManager2 {
       }
     }
 
-  private def persistEvent(id: UUID, orderId: OrderId, event: OrderEvents.Event)(
+  def persist(id: UUID, orderId: OrderId, event: OrderEvents.Event)(
       succ: (OrderState) => Behavior[OrderProtocol.CommandRequest]
   )(implicit
       ctx: ActorContext[OrderProtocol.CommandRequest],
       persistRef: ActorRef[Persist]
   ): Behaviors.Receive[CommandRequest] = {
-    val messageAdaptor = ctx.messageAdapter { msg =>
+    val messageAdaptor = ctx.messageAdapter[PersistReply] { msg =>
       WrappedPersistReply(UUID.randomUUID(), id, orderId, msg)
     }
     persistRef ! Persist(event, messageAdaptor)
@@ -66,6 +65,10 @@ object OrderProcessManager2 {
     }
   }
 
+}
+
+object OrderProcessManager2 {
+
   def apply(
       id: OrderId,
       backoffSettings: BackoffSettings,
@@ -76,7 +79,8 @@ object OrderProcessManager2 {
       Behaviors.withTimers { timers =>
         val maxAttempt: Int = maxAttemptCount(backoffSettings)
 
-        implicit val persistRef: ActorRef[Persist] = ctx.spawn(persistBehavior(id, ctx.self), "persist")
+        implicit val persistRef: ActorRef[OrderEffect.Persist] =
+          ctx.spawn(OrderEffect.persistBehavior(id, ctx.self), "persist")
 
         def stockRecovering(orderState: OrderState.OrderRecovering): Behavior[OrderProtocol.CommandRequest] = {
           Behaviors.receiveMessage {
@@ -95,26 +99,29 @@ object OrderProcessManager2 {
               Behaviors.same
             case WrappedCancelStockReply(_, commandRequestId, orderId, msg, _) =>
               timers.cancel(commandRequestId)
-              persistEvent(UUID.randomUUID(), orderId, OrderRollbacked(UUID.randomUUID(), orderId, Instant.now())) {
-                _ =>
-                  msg match {
-                    case StockProtocol.CancelStockSucceeded(_, _, _) =>
-                      orderState.replyTo ! CreateOrderFailed(
-                        UUID.randomUUID(),
-                        commandRequestId,
-                        orderId,
-                        OrderError.BillingError(orderId)
-                      )
-                      Behaviors.stopped
-                    case StockProtocol.CancelStockFailed(_, commandRequestId, _, _) =>
-                      orderState.replyTo ! CreateOrderFailed(
-                        UUID.randomUUID(),
-                        commandRequestId,
-                        orderId,
-                        OrderError.SecureStockError(orderId)
-                      )
-                      Behaviors.stopped
-                  }
+              OrderEffect.persist(
+                UUID.randomUUID(),
+                orderId,
+                OrderRollbacked(UUID.randomUUID(), orderId, Instant.now())
+              ) { _ =>
+                msg match {
+                  case StockProtocol.CancelStockSucceeded(_, _, _) =>
+                    orderState.replyTo ! CreateOrderFailed(
+                      UUID.randomUUID(),
+                      commandRequestId,
+                      orderId,
+                      OrderError.BillingError(orderId)
+                    )
+                    Behaviors.stopped
+                  case StockProtocol.CancelStockFailed(_, commandRequestId, _, _) =>
+                    orderState.replyTo ! CreateOrderFailed(
+                      UUID.randomUUID(),
+                      commandRequestId,
+                      orderId,
+                      OrderError.SecureStockError(orderId)
+                    )
+                    Behaviors.stopped
+                }
               }
           }
         }
@@ -138,22 +145,28 @@ object OrderProcessManager2 {
               timers.cancel(commandRequestId)
               msg match {
                 case CreateBillingSucceeded(_, commandRequestId, _) =>
-                  persistEvent(UUID.randomUUID(), orderId, OrderCommitted(UUID.randomUUID(), orderId, Instant.now())) {
-                    _ =>
-                      orderState.replyTo ! CreateOrderSucceeded(UUID.randomUUID(), commandRequestId, orderId)
-                      Behaviors.stopped
+                  OrderEffect.persist(
+                    UUID.randomUUID(),
+                    orderId,
+                    OrderCommitted(UUID.randomUUID(), orderId, Instant.now())
+                  ) { _ =>
+                    orderState.replyTo ! CreateOrderSucceeded(UUID.randomUUID(), commandRequestId, orderId)
+                    Behaviors.stopped
                   }
                 case CreateBillingFailed(_, _, _, _) =>
-                  persistEvent(UUID.randomUUID(), orderId, BillingFailed(UUID.randomUUID(), orderId, Instant.now())) {
-                    case state: OrderState.OrderRecovering =>
-                      cancelStock(
-                        orderId,
-                        UUID.randomUUID(),
-                        orderState.stockItems,
-                        orderState.replyTo,
-                        Attempt(2, maxAttempt)
-                      )(ctx, timers, backoffSettings, stockActorRef)
-                      stockRecovering(state)
+                  OrderEffect.persist(
+                    UUID.randomUUID(),
+                    orderId,
+                    BillingFailed(UUID.randomUUID(), orderId, Instant.now())
+                  ) { case state: OrderState.OrderRecovering =>
+                    cancelStock(
+                      orderId,
+                      UUID.randomUUID(),
+                      orderState.stockItems,
+                      orderState.replyTo,
+                      Attempt(2, maxAttempt)
+                    )(ctx, timers, backoffSettings, stockActorRef)
+                    stockRecovering(state)
                   }
               }
           }
@@ -174,38 +187,47 @@ object OrderProcessManager2 {
               timers.cancel(commandRequestId)
               msg match {
                 case StockProtocol.SecureStockSucceeded(_, _, _) =>
-                  persistEvent(commandRequestId, orderId, StockSecured(UUID.randomUUID(), orderId, Instant.now())) {
-                    case state: OrderState.BillingCreating =>
-                      createBilling(
-                        orderId,
-                        UUID.randomUUID(),
-                        orderState.billingItems,
-                        orderState.replyTo,
-                        Attempt(2, maxAttempt)
-                      )(ctx, timers, backoffSettings, billingActorRef)
-                      billingCreating(state)
+                  OrderEffect.persist(
+                    commandRequestId,
+                    orderId,
+                    StockSecured(UUID.randomUUID(), orderId, Instant.now())
+                  ) { case state: OrderState.BillingCreating =>
+                    createBilling(
+                      orderId,
+                      UUID.randomUUID(),
+                      orderState.billingItems,
+                      orderState.replyTo,
+                      Attempt(2, maxAttempt)
+                    )(ctx, timers, backoffSettings, billingActorRef)
+                    billingCreating(state)
                   }
                 case StockProtocol.SecureStockFailed(_, commandRequestId, _, error) =>
-                  persistEvent(commandRequestId, orderId, OrderRollbacked(UUID.randomUUID(), orderId, Instant.now())) {
-                    _ =>
-                      Behaviors.same
+                  OrderEffect.persist(
+                    commandRequestId,
+                    orderId,
+                    OrderRollbacked(UUID.randomUUID(), orderId, Instant.now())
+                  ) { _ =>
+                    Behaviors.same
                   }
               }
           }
 
         def empty(s: OrderState.Empty): Behavior[OrderProtocol.CommandRequest] = Behaviors.receiveMessage {
           case CreateOrder(id, orderId, orderItems, replyTo) =>
-            persistEvent(id, orderId, OrderBegan(UUID.randomUUID(), orderId, orderItems, replyTo, Instant.now())) {
-              case state: OrderState.StockSecuring =>
-                val stockItems = convertToStockItems(orderItems)
-                secureStock(
-                  orderId,
-                  id,
-                  stockItems,
-                  replyTo,
-                  Attempt(2, maxAttempt)
-                )(ctx, timers, backoffSettings, stockActorRef)
-                stockSecuring(state)
+            OrderEffect.persist(
+              id,
+              orderId,
+              OrderBegan(UUID.randomUUID(), orderId, orderItems, replyTo, Instant.now())
+            ) { case state: OrderState.StockSecuring =>
+              val stockItems = convertToStockItems(orderItems)
+              secureStock(
+                orderId,
+                id,
+                stockItems,
+                replyTo,
+                Attempt(2, maxAttempt)
+              )(ctx, timers, backoffSettings, stockActorRef)
+              stockSecuring(state)
             }
         }
 

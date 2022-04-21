@@ -1,8 +1,7 @@
 package example.processManager
 
 import akka.actor.typed.ActorRef
-import example.processManager.OrderError.SecureStockError
-import example.processManager.OrderProcessManager2.PersistReply
+import example.processManager.OrderEffect.PersistReply
 import example.processManager.billing.BillingItems
 import example.processManager.billing.BillingProtocol.CreateBillingReply
 import example.processManager.stock.StockItems
