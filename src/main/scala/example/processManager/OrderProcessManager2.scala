@@ -61,6 +61,7 @@ object OrderProcessManager2 {
         Behaviors.stopped
     }
   }
+
   def apply(
       id: OrderId,
       backoffSettings: BackoffSettings,
