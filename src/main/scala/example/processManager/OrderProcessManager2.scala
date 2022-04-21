@@ -22,7 +22,7 @@ object OrderProcessManager2 {
   case class PersistSucceeded(state: OrderState) extends PersistReply
   case object PersistFailed                      extends PersistReply
 
-  private def persist(id: OrderId, parentRef: ActorRef[OrderProtocol.CommandRequest]): Behavior[Persist] =
+  private def persistBehavior(id: OrderId, parentRef: ActorRef[OrderProtocol.CommandRequest]): Behavior[Persist] =
     Behaviors.setup { ctx =>
       EventSourcedBehavior(
         PersistenceId.ofUniqueId(id.asString),
@@ -43,7 +43,7 @@ object OrderProcessManager2 {
       }
     }
 
-  def persistEvent(id: UUID, orderId: OrderId, event: OrderEvents.Event)(
+  private def persistEvent(id: UUID, orderId: OrderId, event: OrderEvents.Event)(
       succ: (OrderState) => Behavior[OrderProtocol.CommandRequest]
   )(implicit
       ctx: ActorContext[OrderProtocol.CommandRequest],
@@ -72,7 +72,7 @@ object OrderProcessManager2 {
       Behaviors.withTimers { timers =>
         val maxAttempt: Int = maxAttemptCount(backoffSettings)
 
-        implicit val persistRef: ActorRef[Persist] = ctx.spawn(persist(id, ctx.self), "persist")
+        implicit val persistRef: ActorRef[Persist] = ctx.spawn(persistBehavior(id, ctx.self), "persist")
 
         def billingCreating(orderState: OrderState.BillingCreating): Behavior[OrderProtocol.CommandRequest] =
           Behaviors.receiveMessage { case WrappedCreateBillingReply(_, commandRequestId, orderId, msg, replyTo) =>
