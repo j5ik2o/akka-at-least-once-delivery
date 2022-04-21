@@ -19,8 +19,8 @@ object OrderProcessManager2 {
 
   case class Persist(event: OrderEvents.Event, replyTo: ActorRef[PersistReply])
   sealed trait PersistReply
-  case object PersistSucceeded extends PersistReply
-  case object PersistFailed    extends PersistReply
+  case class PersistSucceeded(state: OrderState) extends PersistReply
+  case object PersistFailed                      extends PersistReply
 
   private def persist(id: OrderId, parentRef: ActorRef[OrderProtocol.CommandRequest]): Behavior[Persist] =
     Behaviors.setup { ctx =>
@@ -30,8 +30,8 @@ object OrderProcessManager2 {
         commandHandler = { (state: OrderState, command: Persist) =>
           (state, command) match {
             case (_, Persist(event, replyTo)) =>
-              Effect.persist(event).thenReply(replyTo) { _: OrderState =>
-                PersistSucceeded
+              Effect.persist(event).thenReply(replyTo) { state: OrderState =>
+                PersistSucceeded(state)
               }
           }
         },
@@ -44,7 +44,7 @@ object OrderProcessManager2 {
     }
 
   def persistEvent(id: UUID, orderId: OrderId, event: OrderEvents.Event)(
-      succ: => Behavior[OrderProtocol.CommandRequest]
+      succ: (OrderState) => Behavior[OrderProtocol.CommandRequest]
   )(implicit
       ctx: ActorContext[OrderProtocol.CommandRequest],
       persistRef: ActorRef[Persist]
@@ -54,8 +54,8 @@ object OrderProcessManager2 {
     }
     persistRef ! Persist(event, messageAdaptor)
     Behaviors.receiveMessage {
-      case WrappedPersistReply(_, _, _, PersistSucceeded) =>
-        succ
+      case WrappedPersistReply(_, _, _, PersistSucceeded(state)) =>
+        succ(state)
       case WrappedPersistReply(_, _, _, PersistFailed) =>
         ctx.log.error("persist failed!!!")
         Behaviors.stopped
@@ -80,8 +80,9 @@ object OrderProcessManager2 {
             msg match {
               case CreateBillingSucceeded(_, commandRequestId, _) =>
                 persistEvent(UUID.randomUUID(), orderId, OrderCommitted(UUID.randomUUID(), orderId, Instant.now())) {
-                  orderState.replyTo ! CreateOrderSucceeded(UUID.randomUUID(), commandRequestId, orderId)
-                  Behaviors.stopped
+                  _ =>
+                    orderState.replyTo ! CreateOrderSucceeded(UUID.randomUUID(), commandRequestId, orderId)
+                    Behaviors.stopped
                 }
               case CreateBillingFailed(_, _, _, _) =>
                 Behaviors.same
@@ -94,18 +95,20 @@ object OrderProcessManager2 {
             msg match {
               case SecureStockSucceeded(_, _, _) =>
                 persistEvent(commandRequestId, orderId, StockSecured(UUID.randomUUID(), orderId, Instant.now())) {
-                  createBilling(
-                    orderId,
-                    UUID.randomUUID(),
-                    orderState.billingItems,
-                    orderState.replyTo,
-                    Attempt(2, maxAttempt)
-                  )(ctx, timers, backoffSettings, billingActorRef)
-                  billingCreating(orderState.billingCreating)
+                  case state: OrderState.BillingCreating =>
+                    createBilling(
+                      orderId,
+                      UUID.randomUUID(),
+                      orderState.billingItems,
+                      orderState.replyTo,
+                      Attempt(2, maxAttempt)
+                    )(ctx, timers, backoffSettings, billingActorRef)
+                    billingCreating(state)
                 }
               case SecureStockFailed(_, commandRequestId, _, error) =>
                 persistEvent(commandRequestId, orderId, OrderRollbacked(UUID.randomUUID(), orderId, Instant.now())) {
-                  Behaviors.same
+                  _ =>
+                    Behaviors.same
                 }
             }
           }
@@ -113,15 +116,16 @@ object OrderProcessManager2 {
         val empty: Behavior[OrderProtocol.CommandRequest] = Behaviors.receiveMessage {
           case CreateOrder(id, orderId, orderItems, replyTo) =>
             persistEvent(id, orderId, OrderBegan(UUID.randomUUID(), orderId, orderItems, replyTo, Instant.now())) {
-              val stockItems = convertToStockItems(orderItems)
-              secureStock(
-                orderId,
-                id,
-                stockItems,
-                replyTo,
-                Attempt(2, maxAttempt)
-              )(ctx, timers, backoffSettings, stockActorRef)
-              stockSecuring(OrderState.Empty(orderId).stockSecuring(orderItems, replyTo))
+              case state: OrderState.StockSecuring =>
+                val stockItems = convertToStockItems(orderItems)
+                secureStock(
+                  orderId,
+                  id,
+                  stockItems,
+                  replyTo,
+                  Attempt(2, maxAttempt)
+                )(ctx, timers, backoffSettings, stockActorRef)
+                stockSecuring(state)
             }
         }
 
