@@ -4,6 +4,7 @@ import akka.actor.typed.scaladsl.{ ActorContext, Behaviors, StashBuffer, TimerSc
 import akka.actor.typed.{ ActorRef, Behavior }
 import akka.persistence.typed.scaladsl.{ Effect, EventSourcedBehavior }
 import akka.persistence.typed.{ PersistenceId, RecoveryCompleted }
+import example.processManager.OrderEffect.Persist
 import example.processManager.OrderEvents._
 import example.processManager.OrderProtocol._
 import example.processManager.billing.BillingProtocol.{
@@ -28,6 +29,7 @@ object OrderEffect {
   private val persistStates: scala.collection.mutable.Map[OrderId, Option[OrderState]] =
     new ConcurrentHashMap[OrderId, Option[OrderState]]().asScala
 
+  // akka-persistenceを抽象化したアクター(テスト用途)
   def persistInMemoryBehavior(
       id: OrderId,
       parentRef: ActorRef[OrderProtocol.CommandRequest]
@@ -99,17 +101,15 @@ object OrderProcessManager2 {
       id: OrderId,
       backoffSettings: BackoffSettings,
       stockActorRef: ActorRef[StockProtocol.CommandRequest],
-      billingActorRef: ActorRef[BillingProtocol.CommandRequest]
+      billingActorRef: ActorRef[BillingProtocol.CommandRequest],
+      persistBehaviorF: (OrderId, ActorRef[CommandRequest]) => Behavior[Persist] = OrderEffect.persistBehavior
   ): Behavior[OrderProtocol.CommandRequest] =
     Behaviors.setup { implicit ctx =>
       Behaviors.withTimers { timers =>
         val maxAttempt: Int = maxAttemptCount(backoffSettings)
 
-// OrderEffect.persistInMemoryBehavior を使うとakka-persistenceを切り離してテスト可能
-//        implicit val persistRef: ActorRef[OrderEffect.Persist] =
-//          ctx.spawn(OrderEffect.persistInMemoryBehavior(id, ctx.self), "persist")
         implicit val persistRef: ActorRef[OrderEffect.Persist] =
-          ctx.spawn(OrderEffect.persistBehavior(id, ctx.self), "persist")
+          ctx.spawn(persistBehaviorF(id, ctx.self), "persist")
 
         def stockRecovering(orderState: OrderState.OrderRecovering): Behavior[OrderProtocol.CommandRequest] = {
           Behaviors.receiveMessage {
