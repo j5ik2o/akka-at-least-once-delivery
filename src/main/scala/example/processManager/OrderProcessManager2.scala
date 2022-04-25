@@ -16,14 +16,44 @@ import example.processManager.stock._
 
 import java.time.Instant
 import java.util.UUID
-import java.util.concurrent.ThreadLocalRandom
+import java.util.concurrent.{ ConcurrentHashMap, ThreadLocalRandom }
 import scala.concurrent.duration.FiniteDuration
+import scala.jdk.CollectionConverters._
 
 object OrderEffect {
   case class Persist(event: OrderEvents.Event, replyTo: ActorRef[PersistReply])
   sealed trait PersistReply
-  case class PersistSucceeded(state: OrderState) extends PersistReply
-  case object PersistFailed                      extends PersistReply
+  case class PersistCompleted(state: OrderState) extends PersistReply
+
+  private val persistStates: scala.collection.mutable.Map[OrderId, Option[OrderState]] =
+    new ConcurrentHashMap[OrderId, Option[OrderState]]().asScala
+
+  def persistInMemoryBehavior(
+      id: OrderId,
+      parentRef: ActorRef[OrderProtocol.CommandRequest]
+  ): Behavior[Persist] = {
+    Behaviors.setup { ctx =>
+      val initialState = persistStates.getOrElseUpdate(id, None) match {
+        case Some(state) =>
+          parentRef ! StateRecoveryCompleted(UUID.randomUUID(), UUID.randomUUID(), id, state)
+          state
+        case None =>
+          val state = OrderState.Empty(id)
+          parentRef ! StateRecoveryCompleted(UUID.randomUUID(), UUID.randomUUID(), id, state)
+          state
+      }
+      def state(s: OrderState): Behavior[Persist] = {
+        Behaviors
+          .receiveMessage { case Persist(event, replyTo) =>
+            val newState = s.applyEvent(event)
+            replyTo ! PersistCompleted(newState)
+            persistStates.put(id, Some(newState))
+            state(newState)
+          }
+      }
+      state(initialState)
+    }
+  }
 
   def persistBehavior(id: OrderId, parentRef: ActorRef[OrderProtocol.CommandRequest]): Behavior[Persist] =
     Behaviors.setup { ctx =>
@@ -34,7 +64,7 @@ object OrderEffect {
           (state, command) match {
             case (_, Persist(event, replyTo)) =>
               Effect.persist(event).thenReply(replyTo) { state: OrderState =>
-                PersistSucceeded(state)
+                PersistCompleted(state)
               }
           }
         },
@@ -56,12 +86,8 @@ object OrderEffect {
       WrappedPersistReply(UUID.randomUUID(), id, orderId, msg)
     }
     persistRef ! Persist(event, messageAdaptor)
-    Behaviors.receiveMessage {
-      case WrappedPersistReply(_, _, _, PersistSucceeded(state)) =>
-        succ(state)
-      case WrappedPersistReply(_, _, _, PersistFailed) =>
-        ctx.log.error("persist failed!!!")
-        Behaviors.stopped
+    Behaviors.receiveMessagePartial { case WrappedPersistReply(_, _, _, PersistCompleted(state)) =>
+      succ(state)
     }
   }
 
@@ -79,6 +105,9 @@ object OrderProcessManager2 {
       Behaviors.withTimers { timers =>
         val maxAttempt: Int = maxAttemptCount(backoffSettings)
 
+// OrderEffect.persistInMemoryBehavior を使うとakka-persistenceを切り離してテスト可能
+//        implicit val persistRef: ActorRef[OrderEffect.Persist] =
+//          ctx.spawn(OrderEffect.persistInMemoryBehavior(id, ctx.self), "persist")
         implicit val persistRef: ActorRef[OrderEffect.Persist] =
           ctx.spawn(OrderEffect.persistBehavior(id, ctx.self), "persist")
 

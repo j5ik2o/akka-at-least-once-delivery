@@ -87,7 +87,7 @@ class OrderProcessManager2Spec extends ScalaTestWithActorTestKit(OrderProcessMan
         createOrderReplyTestProbe.ref
       )
 
-      val reply = createOrderReplyTestProbe.expectMessageType[OrderProtocol.CreateOrderSucceeded]
+      val reply = createOrderReplyTestProbe.expectMessageType[OrderProtocol.CreateOrderSucceeded](3.seconds)
       assert(orderId == reply.orderId)
 
       orderProcessManagerRefResult.stockProbe.expectMessageType[StockProtocol.SecureStock]
