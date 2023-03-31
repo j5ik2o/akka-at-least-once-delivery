@@ -32,6 +32,8 @@ object BankAccountCommands {
   sealed trait CreateBankAccountReply
   final case class CreateBankAccountSucceeded(aggregateId: BankAccountAggregateId) extends CreateBankAccountReply
 
+  // ---
+
   final case class DepositCash(
       override val aggregateId: BankAccountAggregateId,
       amount: Money,
@@ -41,12 +43,32 @@ object BankAccountCommands {
   final case class DepositCashSucceeded(aggregateId: BankAccountAggregateId) extends DepositCashReply
   final case class DepositCashFailed(aggregateId: BankAccountAggregateId, error: BankAccountError)
       extends DepositCashReply
+
+  // ---
+
+  final case class WithdrawCash(
+      override val aggregateId: BankAccountAggregateId,
+      amount: Money,
+      replyTo: ActorRef[WithdrawCashReply]
+  ) extends Command
+
+  sealed trait WithdrawCashReply
+
+  final case class WithdrawCashSucceeded(aggregateId: BankAccountAggregateId) extends WithdrawCashReply
+
+  final case class WithdrawCashFailed(aggregateId: BankAccountAggregateId, error: BankAccountError)
+      extends WithdrawCashReply
+
+  // ---
+
   final case class GetBalance(
       override val aggregateId: BankAccountAggregateId,
       replyTo: ActorRef[GetBalanceReply]
   ) extends Command
 
   final case class GetBalanceReply(aggregateId: BankAccountAggregateId, balance: Money)
+
+  // ---
 
   private[persistence] final case class WrappedStateRecoveryCompleted(
       override val aggregateId: BankAccountAggregateId,

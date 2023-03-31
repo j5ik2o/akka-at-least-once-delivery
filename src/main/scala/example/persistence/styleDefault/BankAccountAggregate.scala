@@ -51,12 +51,15 @@ object BankAccountAggregate {
 
   private def commandHandler
       : (States.State, BankAccountCommands.Command) => ReplyEffect[BankAccountEvents.Event, States.State] = {
+    // 口座残高の取得
     case (Created(_, bankAccount), BankAccountCommands.GetBalance(aggregateId, replyTo)) =>
       Effect.reply(replyTo)(BankAccountCommands.GetBalanceReply(aggregateId, bankAccount.balance))
+    // 口座開設コマンド
     case (_, BankAccountCommands.CreateBankAccount(aggregateId, replyTo)) =>
       Effect.persist(BankAccountEvents.BankAccountCreated(aggregateId, Instant.now())).thenReply(replyTo) { _ =>
         BankAccountCommands.CreateBankAccountSucceeded(aggregateId)
       }
+    // 現金の入金
     case (state: Created, BankAccountCommands.DepositCash(aggregateId, amount, replyTo)) =>
       // NOTE: コマンドはドメインロジックを呼び出す
       state.bankAccount.add(amount) match {
@@ -68,16 +71,34 @@ object BankAccountAggregate {
         case Left(error) =>
           Effect.reply(replyTo)(BankAccountCommands.DepositCashFailed(aggregateId, error))
       }
+    // 現金の出金
+    case (state: Created, BankAccountCommands.WithdrawCash(aggregateId, amount, replyTo)) =>
+      state.bankAccount.subtract(amount) match {
+        case Right(_) =>
+          Effect.persist(BankAccountEvents.CashWithdrew(aggregateId, amount, Instant.now())).thenReply(replyTo) { _ =>
+            BankAccountCommands.WithdrawCashSucceeded(aggregateId)
+          }
+        case Left(error) =>
+          Effect.reply(replyTo)(BankAccountCommands.WithdrawCashFailed(aggregateId, error))
+      }
   }
 
   private def eventHandler: (States.State, BankAccountEvents.Event) => States.State = {
     case (_, BankAccountEvents.BankAccountCreated(aggregateId, _)) =>
       Created(aggregateId, bankAccount = BankAccount(aggregateId.toEntityId))
     case (Created(_, bankAccount), BankAccountEvents.CashDeposited(aggregateId, amount, _)) =>
-      bankAccount.add(amount) match {
-        case Right(result) => Created(aggregateId, bankAccount = result)
-        case Left(error)   => throw new Exception(s"error = $error")
-      }
+      // NOTE: イベントハンドラでも結局Eitherは使う価値がない...
+      bankAccount
+        .add(amount).fold(
+          { error => throw new Exception(s"error = $error") },
+          { result => Created(aggregateId, bankAccount = result) }
+        )
+    case (Created(_, bankAccount), BankAccountEvents.CashWithdrew(aggregateId, amount, _)) =>
+      bankAccount
+        .subtract(amount).fold(
+          { error => throw new Exception(s"error = $error") },
+          { result => Created(aggregateId, bankAccount = result) }
+        )
   }
 
 }

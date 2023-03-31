@@ -30,9 +30,15 @@ final case class BankAccount(
 
   def add(amount: Money): Either[BankAccountError, BankAccount] =
     if (limit < (balance + amount))
-      Right(coyp(balance = balance + amount))
-    else Left(BankAccountError.LimitOverError)
+      Left(BankAccountError.LimitOverError)
+    else
+      Right(copy(balance = balance + amount))
 
-  def subtract(amount: Money): BankAccount = copy(balance = balance - amount)
+  def subtract(amount: Money): Either[BankAccountError, BankAccount] = {
+    if (Money(0, Money.JPY) > (balance - amount))
+      Left(BankAccountError.LimitOverError)
+    else
+      Right(copy(balance = balance - amount))
+  }
 
 }

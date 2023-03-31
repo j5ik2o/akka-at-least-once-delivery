@@ -36,4 +36,10 @@ object BankAccountEvents {
       amount: Money,
       override val occurredAt: Instant
   ) extends Event
+
+  final case class CashWithdrew(
+      override val aggregateId: BankAccountAggregateId,
+      amount: Money,
+      override val occurredAt: Instant
+  ) extends Event
 }
