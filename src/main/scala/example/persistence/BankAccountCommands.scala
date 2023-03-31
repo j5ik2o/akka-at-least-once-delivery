@@ -16,8 +16,8 @@
 package example.persistence
 
 import akka.actor.typed.ActorRef
-import example.persistence.domain.Money
-import example.persistence.styleNew.BankAccountAggregate
+import example.persistence.domain.{ BankAccountError, Money }
+import example.persistence.styleEffector.BankAccountAggregate
 import example.support.{ AggregateCommand, StateRecoveryCompleted }
 
 object BankAccountCommands {
@@ -39,7 +39,8 @@ object BankAccountCommands {
   ) extends Command
   sealed trait DepositCashReply
   final case class DepositCashSucceeded(aggregateId: BankAccountAggregateId) extends DepositCashReply
-
+  final case class DepositCashFailed(aggregateId: BankAccountAggregateId, error: BankAccountError)
+      extends DepositCashReply
   final case class GetBalance(
       override val aggregateId: BankAccountAggregateId,
       replyTo: ActorRef[GetBalanceReply]

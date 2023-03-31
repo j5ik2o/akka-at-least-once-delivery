@@ -13,23 +13,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package example.persistence.styleNew
+package example.persistence.styleEffector
 
 import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.{ ActorContext, Behaviors, StashBuffer }
 import example.persistence.{ BankAccountAggregateId, BankAccountCommands, BankAccountEvents }
-import example.persistence.domain.{ BankAccountId, Money }
-import example.persistence.styleNew.BankAccountAggregate.States.Created
-import example.persistence.styleNew.BankAccountAggregate.{ actorName, CTX }
+import example.persistence.domain.{ BankAccount, BankAccountId, Money }
+import example.persistence.styleEffector.BankAccountAggregate.States.Created
+import example.persistence.styleEffector.BankAccountAggregate.{ actorName, CTX }
 import example.support.{ AggregateId, AggregateTypeName, PersistEffect, PersistentMode }
 
 import java.time.Instant
 import java.util.{ Currency, UUID }
 
+/** このスタイルのPros/Cons
+  *
+  *   - Pros
+  *     - コマンドハンドラにドメインロジックが記述しやすい
+  *     - Behaviorを使ったプログラミングができる
+  *   - Cons
+  *     - 記述量が増える
+  */
 object BankAccountAggregate {
   type CTX = ActorContext[BankAccountCommands.Command]
-
-  val JPY = Currency.getInstance("JPY")
 
   object States {
     sealed trait State extends example.support.State {
@@ -39,14 +45,20 @@ object BankAccountAggregate {
 
     final case object NotCreated extends State {
       override def applyEvent(event: BankAccountEvents.Event): State = event match {
-        case BankAccountEvents.BankAccountCreated(aggregateId, _) => Created(aggregateId, balance = Money(0, JPY))
+        case BankAccountEvents.BankAccountCreated(aggregateId, _) =>
+          Created(aggregateId, bankAccount = new BankAccount(aggregateId.toEntityId))
         case _ => throw new IllegalStateException(s"Unexpected event: $event")
       }
     }
 
-    final case class Created(aggregateId: AggregateId, balance: Money) extends State {
+    final case class Created(aggregateId: BankAccountAggregateId, bankAccount: BankAccount) extends State {
       override def applyEvent(event: BankAccountEvents.Event): State = event match {
-        case BankAccountEvents.CashDeposited(aggregateId, amount, _) => Created(aggregateId, balance = balance + amount)
+        case BankAccountEvents.CashDeposited(aggregateId, amount, _) =>
+          // NOTE: ここは同じような書き方になる
+          bankAccount.add(amount) match {
+            case Right(result) => Created(aggregateId, bankAccount = result)
+            case Left(error)   => throw new Exception(s"error = $error")
+          }
       }
     }
   }
@@ -57,10 +69,10 @@ object BankAccountAggregate {
 
   // NOTE: PersistentMode.InMemoryの場合は、akka-persistenceのための設定・初期化などが不要です。
   // 通常のインメモリなアクターとしてテストできます。
-  def apply(aggregateId: BankAccountAggregateId, persistentMode: PersistentMode, stashBufferSize: Int = Int.MaxValue)(
-      implicit
-      ctx: CTX,
-      stashBuffer: StashBuffer[BankAccountCommands.Command]
+  def apply(
+      aggregateId: BankAccountAggregateId,
+      persistentMode: PersistentMode,
+      stashBufferSize: Int = Int.MaxValue
   ): Behavior[BankAccountCommands.Command] =
     Behaviors.setup { implicit ctx =>
       Behaviors.withStash(stashBufferSize) { implicit stashBuffer =>
@@ -110,7 +122,7 @@ class BankAccountAggregate(aggregateId: BankAccountAggregateId, persistentMode: 
       Behaviors.same
   }
 
-  // 未開設状態のハンドラ
+  // 未開設状態のコマンドハンドラ
   private def notCreated: Behavior[BankAccountCommands.Command] =
     Behaviors.receiveMessagePartial {
       // 口座の開設
@@ -121,19 +133,26 @@ class BankAccountAggregate(aggregateId: BankAccountAggregateId, persistentMode: 
         }
     }
 
-  // 開設済み状態のハンドラ
+  // 開設済み状態のコマンドハンドラ
   private def created(state: Created): Behavior[BankAccountCommands.Command] =
     Behaviors.receiveMessagePartial {
       // 残高の取得
       case BankAccountCommands.GetBalance(aggregateId, replyTo) =>
-        replyTo ! BankAccountCommands.GetBalanceReply(aggregateId, state.balance)
+        replyTo ! BankAccountCommands.GetBalanceReply(aggregateId, state.bankAccount.balance)
         Behaviors.same
       // 現金の入金
       case BankAccountCommands.DepositCash(aggregateId, amount, replyTo) =>
-        effector.persist(BankAccountEvents.CashDeposited(aggregateId, amount, Instant.now())) {
-          case (state: Created, _) =>
-            replyTo ! BankAccountCommands.DepositCashSucceeded(aggregateId)
-            created(state)
+        state.bankAccount.add(amount) match {
+          // NOTE: 戻り値は捨てずに次のステートに組み込むことができる
+          case Right(result) =>
+            val newState = state.copy(bankAccount = result)
+            effector.persist(BankAccountEvents.CashDeposited(aggregateId, amount, Instant.now())) { case (_, _) =>
+              replyTo ! BankAccountCommands.DepositCashSucceeded(aggregateId)
+              created(newState)
+            }
+          case Left(error) =>
+            replyTo ! BankAccountCommands.DepositCashFailed(aggregateId, error)
+            Behaviors.same
         }
     }
 }
