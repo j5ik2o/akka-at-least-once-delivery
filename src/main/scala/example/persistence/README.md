@@ -35,7 +35,7 @@ Behaviorを使って状態遷移を記述できます。
 - この方法ではEventSourcedBehaviorを集約アクターの子アクターとするため、上記の問題を解消できます。
 - 通常のアクタープログラミングの実装方法をそのまま適用可能です。
 - 通常のアクタープログラミングの実装から永続化対応されることが比較的容易です。
-- 実装例では完全なインメモリモードを提供しているので、初期実装を書くうえではAkka Persistence Typedさえ不要になります。
+- 実装例では完全なインメモリモードを提供しているので、初期実装を書く上ではAkka Persistence Typedさえ不要になります。
 
 [BankAccountAggregate](https://github.com/j5ik2o/akka-at-least-once-delivery/blob/main/src/main/scala/example/persistence/styleEffector/BankAccountAggregate.scala)
 
