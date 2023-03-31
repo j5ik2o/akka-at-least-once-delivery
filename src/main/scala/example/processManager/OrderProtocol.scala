@@ -1,7 +1,6 @@
 package example.processManager
 
 import akka.actor.typed.ActorRef
-import example.processManager.OrderEffect.PersistReply
 import example.processManager.billing.BillingItems
 import example.processManager.billing.BillingProtocol.CreateBillingReply
 import example.processManager.stock.StockItems
@@ -73,13 +72,6 @@ object OrderProtocol {
       orderId: OrderId,
       msg: CreateBillingReply,
       replyTo: ActorRef[CreateOrderReply]
-  ) extends CommandRequest
-
-  case class WrappedPersistReply(
-      id: UUID,
-      commandRequestId: UUID,
-      orderId: OrderId,
-      message: PersistReply
   ) extends CommandRequest
 
   case class StateRecoveryCompleted(id: UUID, commandRequestId: UUID, orderId: OrderId, state: OrderState)
