@@ -33,5 +33,6 @@ StateとCommandが複雑な場合はコマンドハンドラの保守性が下�
 ## 新しい書き方の提案
 
 この方法ではEventSourcedBehaviorを集約アクターの子アクターとするため、上記の問題を解消できます。
+通常のアクタープログラミングの実装方法をそのまま適用可能です。
 
 [BankAccountAggregate](https://github.com/j5ik2o/akka-at-least-once-delivery/blob/main/src/main/scala/example/persistence/styleEffector/BankAccountAggregate.scala)
