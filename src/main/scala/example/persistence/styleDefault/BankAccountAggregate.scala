@@ -27,8 +27,8 @@ import java.time.Instant
 /** このスタイルの問題
   *
   *   - デメリット
+  *     - Behaviorを使ったアクタープログラミングができない。状態が複雑な場合は保守性が下がる
   *     - コマンドハンドラでドメインオブジェクトが使いにくい
-  *     - Behaviorを使ったアクタープログラミングができない
   *   - メリット
   *     - 記述するコード量が少ない
   */
@@ -51,6 +51,8 @@ object BankAccountAggregate {
 
   private def commandHandler
       : (States.State, BankAccountCommands.Command) => ReplyEffect[BankAccountEvents.Event, States.State] = {
+    case (Created(_, bankAccount), BankAccountCommands.GetBalance(aggregateId, replyTo)) =>
+      Effect.reply(replyTo)(BankAccountCommands.GetBalanceReply(aggregateId, bankAccount.balance))
     case (_, BankAccountCommands.CreateBankAccount(aggregateId, replyTo)) =>
       Effect.persist(BankAccountEvents.BankAccountCreated(aggregateId, Instant.now())).thenReply(replyTo) { _ =>
         BankAccountCommands.CreateBankAccountSucceeded(aggregateId)

@@ -29,8 +29,9 @@ import java.util.{ Currency, UUID }
 /** このスタイルのPros/Cons
   *
   *   - Pros
+  *     - Behaviorを使ったプログラミングができるので、そこまで学習コストが高くない
+  *       - 状態遷移が複雑な場合でも比較的シンプルに記述できる
   *     - コマンドハンドラにドメインロジックが記述しやすい
-  *     - Behaviorを使ったプログラミングができる
   *   - Cons
   *     - 記述量が増える
   */
@@ -46,7 +47,7 @@ object BankAccountAggregate {
     final case object NotCreated extends State {
       override def applyEvent(event: BankAccountEvents.Event): State = event match {
         case BankAccountEvents.BankAccountCreated(aggregateId, _) =>
-          Created(aggregateId, bankAccount = new BankAccount(aggregateId.toEntityId))
+          Created(aggregateId, bankAccount = BankAccount(aggregateId.toEntityId))
         case _ => throw new IllegalStateException(s"Unexpected event: $event")
       }
     }
@@ -145,10 +146,9 @@ class BankAccountAggregate(aggregateId: BankAccountAggregateId, persistentMode: 
         state.bankAccount.add(amount) match {
           // NOTE: 戻り値は捨てずに次のステートに組み込むことができる
           case Right(result) =>
-            val newState = state.copy(bankAccount = result)
             effector.persist(BankAccountEvents.CashDeposited(aggregateId, amount, Instant.now())) { case (_, _) =>
               replyTo ! BankAccountCommands.DepositCashSucceeded(aggregateId)
-              created(newState)
+              created(state.copy(bankAccount = result))
             }
           case Left(error) =>
             replyTo ! BankAccountCommands.DepositCashFailed(aggregateId, error)
