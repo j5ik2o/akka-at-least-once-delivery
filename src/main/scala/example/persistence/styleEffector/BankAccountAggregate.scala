@@ -17,14 +17,13 @@ package example.persistence.styleEffector
 
 import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.{ ActorContext, Behaviors, StashBuffer }
-import example.persistence.{ BankAccountAggregateId, BankAccountCommands, BankAccountEvents }
-import example.persistence.domain.{ BankAccount, BankAccountId, Money }
+import example.persistence.domain.BankAccount
 import example.persistence.styleEffector.BankAccountAggregate.States.Created
 import example.persistence.styleEffector.BankAccountAggregate.{ actorName, CTX }
-import example.support.{ AggregateId, AggregateTypeName, PersistEffect, PersistentMode }
+import example.persistence.{ BankAccountAggregateId, BankAccountCommands, BankAccountEvents }
+import example.support.{ AggregateId, PersistEffect, PersistentMode }
 
 import java.time.Instant
-import java.util.{ Currency, UUID }
 
 /** このスタイルのPros/Cons
   *
@@ -36,9 +35,9 @@ import java.util.{ Currency, UUID }
   *     - 記述量が増える
   */
 object BankAccountAggregate {
-  type CTX = ActorContext[BankAccountCommands.Command]
+  private type CTX = ActorContext[BankAccountCommands.Command]
 
-  object States {
+  private[styleEffector] object States {
     sealed trait State extends example.support.State {
       override type This  = BankAccountAggregate.States.State
       override type Event = BankAccountEvents.Event
@@ -90,7 +89,7 @@ object BankAccountAggregate {
 
 }
 
-class BankAccountAggregate(aggregateId: BankAccountAggregateId, persistentMode: PersistentMode)(implicit
+private class BankAccountAggregate(aggregateId: BankAccountAggregateId, persistentMode: PersistentMode)(implicit
     ctx: CTX,
     stashBuffer: StashBuffer[BankAccountCommands.Command]
 ) extends PersistEffect {
@@ -132,22 +131,23 @@ class BankAccountAggregate(aggregateId: BankAccountAggregateId, persistentMode: 
   private def notCreated: Behavior[BankAccountCommands.Command] =
     Behaviors.receiveMessagePartial {
       // 口座の開設
-      case BankAccountCommands.CreateBankAccount(aggregateId: AggregateId, replyTo) =>
-         effector.persist(BankAccountEvents.BankAccountCreated(aggregateId, Instant.now())) { case (state: Created, _) =>
-        replyTo ! BankAccountCommands.CreateBankAccountSucceeded(aggregateId)
-        created(state)
-      }
+      case BankAccountCommands.CreateBankAccount(aggregateId: AggregateId, replyTo)
+          if aggregateId == this.aggregateId =>
+        effector.persist(BankAccountEvents.BankAccountCreated(aggregateId, Instant.now())) { case (state: Created, _) =>
+          replyTo ! BankAccountCommands.CreateBankAccountSucceeded(aggregateId)
+          created(state)
+        }
     }
 
   // 開設済み状態のコマンドハンドラ
   private def created(state: Created): Behavior[BankAccountCommands.Command] =
     Behaviors.receiveMessagePartial {
       // 残高の取得
-      case BankAccountCommands.GetBalance(aggregateId, replyTo) =>
+      case BankAccountCommands.GetBalance(aggregateId, replyTo) if aggregateId == this.aggregateId =>
         replyTo ! BankAccountCommands.GetBalanceReply(aggregateId, state.bankAccount.balance)
         Behaviors.same
       // 現金の入金
-      case BankAccountCommands.DepositCash(aggregateId, amount, replyTo) =>
+      case BankAccountCommands.DepositCash(aggregateId, amount, replyTo) if aggregateId == this.aggregateId =>
         state.bankAccount.add(amount) match {
           // NOTE: 戻り値は捨てずに次のステートに組み込むことができる
           case Right(result) =>
@@ -160,7 +160,7 @@ class BankAccountAggregate(aggregateId: BankAccountAggregateId, persistentMode: 
             Behaviors.same
         }
       // 現金の出金
-      case BankAccountCommands.WithdrawCash(aggregateId, amount, replyTo) =>
+      case BankAccountCommands.WithdrawCash(aggregateId, amount, replyTo) if aggregateId == this.aggregateId =>
         state.bankAccount.subtract(amount) match {
           case Right(result) =>
             effector.persist(BankAccountEvents.CashWithdrew(aggregateId, amount, Instant.now())) { case (_, _) =>

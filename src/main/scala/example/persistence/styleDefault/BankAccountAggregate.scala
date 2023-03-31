@@ -34,7 +34,7 @@ import java.time.Instant
   */
 object BankAccountAggregate {
 
-  object States {
+  private[styleDefault] object States {
     sealed trait State
     final case object NotCreated                                                            extends State
     final case class Created(aggregateId: BankAccountAggregateId, bankAccount: BankAccount) extends State

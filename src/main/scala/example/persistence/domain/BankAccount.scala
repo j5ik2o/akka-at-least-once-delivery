@@ -15,8 +15,6 @@
  */
 package example.persistence.domain
 
-import java.util.Currency
-
 sealed trait BankAccountError
 object BankAccountError {
   case object LimitOverError extends BankAccountError
