@@ -13,9 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package example.aggregate
+package example.persistence
 
 import akka.actor.typed.ActorRef
+import example.persistence.domain.Money
+import example.persistence.styleNew.BankAccountAggregate
 import example.support.{ AggregateCommand, StateRecoveryCompleted }
 
 object BankAccountCommands {
@@ -45,12 +47,12 @@ object BankAccountCommands {
 
   final case class GetBalanceReply(aggregateId: BankAccountAggregateId, balance: Money)
 
-  private[aggregate] final case class WrappedStateRecoveryCompleted(
+  private[persistence] final case class WrappedStateRecoveryCompleted(
       override val aggregateId: BankAccountAggregateId,
       inner: StateRecoveryCompleted[BankAccountAggregate.States.State]
   ) extends Command
 
-  private[aggregate] final case class WrappedPersisted(
+  private[persistence] final case class WrappedPersisted(
       override val aggregateId: BankAccountAggregateId,
       newState: BankAccountAggregate.States.State,
       event: BankAccountEvents.Event

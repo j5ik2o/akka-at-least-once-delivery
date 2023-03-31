@@ -13,30 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package example.aggregate
+package example.persistence.styleNew
 
 import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.{ ActorContext, Behaviors, StashBuffer }
-import example.aggregate.BankAccountAggregate.States.Created
-import example.aggregate.BankAccountAggregate.{ actorName, CTX }
-import example.support.{ AggregateId, AggregateTypeName, EntityId, PersistEffect, PersistentMode }
+import example.persistence.{ BankAccountAggregateId, BankAccountCommands, BankAccountEvents }
+import example.persistence.domain.{ BankAccountId, Money }
+import example.persistence.styleNew.BankAccountAggregate.States.Created
+import example.persistence.styleNew.BankAccountAggregate.{ actorName, CTX }
+import example.support.{ AggregateId, AggregateTypeName, PersistEffect, PersistentMode }
 
 import java.time.Instant
 import java.util.{ Currency, UUID }
-
-case class BankAccountId(value: UUID) extends EntityId {
-  override def asString: String = value.toString
-}
-
-case class BankAccountAggregateId(value: UUID) extends AggregateId {
-  override type EntityIdType = BankAccountId
-
-  override def toEntityId: EntityIdType = BankAccountId(value)
-
-  override def asString: String = value.toString
-
-  override def aggregateTypeName: AggregateTypeName = AggregateTypeName("bank-account")
-}
 
 object BankAccountAggregate {
   type CTX = ActorContext[BankAccountCommands.Command]
@@ -63,10 +51,12 @@ object BankAccountAggregate {
     }
   }
 
+  // アクター名を生成するためのヘルパー関数
   def actorName(aggregateId: BankAccountAggregateId): String =
     s"${aggregateId.aggregateTypeName}-${aggregateId.asString}"
 
-  // NOTE: PersistentMode.InMemoryの場合は、akka-persistenceのための設定・初期化などが不要です。通常のインメモリなアクターとしてテストできます。
+  // NOTE: PersistentMode.InMemoryの場合は、akka-persistenceのための設定・初期化などが不要です。
+  // 通常のインメモリなアクターとしてテストできます。
   def apply(aggregateId: BankAccountAggregateId, persistentMode: PersistentMode, stashBufferSize: Int = Int.MaxValue)(
       implicit
       ctx: CTX,

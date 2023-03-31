@@ -13,11 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package example.aggregate
+package example.persistence.domain
 
-import java.util.{ Currency, Locale }
-
-import scala.math.BigDecimal
+import java.util.{Currency, Locale}
 
 /** 金額を表すクラス。
   *
