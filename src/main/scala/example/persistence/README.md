@@ -1,10 +1,10 @@
-Akka Persistence Typedの実装方法の改善について
+# Akka Persistence Typedの実装方法の改善について
 
-# 目的
+## 目的
 
 このドキュメントの目的は、Akka Persistence Typedの実装方法の改善についての提案です。
 
-# 問題
+## 問題
 
 Akka Persistence Typedの現在の実装では、次のような問題があります。
 
@@ -14,7 +14,7 @@ Akka Persistence Typedの現在の実装では、次のような問題があり�
 
 この問題をわかりやすくするために、銀行口座集約を例にして解説します。
 
-# 通常のアクタープログラミングではどうなるか
+## 通常のアクタープログラミングではどうなるか
 
 Behaviorを使って状態遷移を記述できます。
 
