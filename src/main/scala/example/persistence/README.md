@@ -25,7 +25,7 @@ Behaviorを使って状態遷移を記述できます。
 
 - EventSourcedBehaviorに従う必要があるため、コマンドハンドラはBehaviorを返せません。漸進的な実装がしにくい。
 - StateとCommandが複雑な場合はコマンドハンドラの保守性が下がります。→これについては分割して記述するなど対策はあります。
-- 状態更新を扱えないとなると、ロジックをドメインオブジェクトに委譲することを考えると、DDDとの相性がよくないです。
+- 状態更新を扱えないとなると、ロジックをドメインオブジェクトに委譲しにくい。DDDとの相性がよくないです。
 
 [BankAccountAggregate](https://github.com/j5ik2o/akka-at-least-once-delivery/blob/main/src/main/scala/example/persistence/styleDefault/BankAccountAggregate.scala)
 
