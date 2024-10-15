@@ -28,12 +28,13 @@ object OrderProcessManager1 {
   def apply(
       id: OrderId,
       backoffSettings: BackoffSettings,
-      stockActorRef: ActorRef[StockProtocol.CommandRequest],
-      billingActorRef: ActorRef[BillingProtocol.CommandRequest]
+      stockActorRef: ActorRef[StockProtocol.CommandRequest],    // 在庫アクター
+      billingActorRef: ActorRef[BillingProtocol.CommandRequest] // 決済アクター
   ): Behavior[OrderProtocol.CommandRequest] = {
     Behaviors.setup { ctx =>
       val maxAttempt = maxAttemptCount(backoffSettings)
       Behaviors.withTimers { timers =>
+        // プロセスマネージャーは永続化アクターである必要がある
         EventSourcedBehavior(
           PersistenceId.ofUniqueId(id.asString),
           emptyState = OrderState.Empty(id),
@@ -56,7 +57,7 @@ object OrderProcessManager1 {
       .orElse(stockSecuringCommandHandler)
       .orElse(billingCreatingCommandHandler)
       .orElse(orderRecoveringCommandHandler)
-    pf(state, event)
+    pf((state, event))
   }
 
   private def eventHandler(
@@ -110,9 +111,9 @@ object OrderProcessManager1 {
       )
   }
 
-  type PartialCommandHandler[Command, Event, State] = PartialFunction[(State, Command), Effect[Event, State]]
+  private type PartialCommandHandler[Command, Event, State] = PartialFunction[(State, Command), Effect[Event, State]]
 
-  def convertToStockItems(orderItems: OrderItems): StockItems = {
+  private def convertToStockItems(orderItems: OrderItems): StockItems = {
     def newId() = StockItemId()
     val head    = StockItem(newId(), orderItems.head.itemId, orderItems.head.itemQuantity)
     val tail    = orderItems.tail.map { it => StockItem(newId(), it.itemId, it.itemQuantity) }

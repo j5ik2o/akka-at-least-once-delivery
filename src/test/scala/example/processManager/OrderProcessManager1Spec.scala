@@ -69,7 +69,7 @@ object OrderProcessManager1Spec {
   final val MIN_BACKOFF: FiniteDuration = 100.millis
   final val MAX_BACKOFF: FiniteDuration = 1000.millis
   final val RANDOM_FACTOR: Double       = 0.8
-  final val BACKOFF_SETTINGS            = BackoffSettings(MIN_BACKOFF, MAX_BACKOFF, RANDOM_FACTOR)
+  final val BACKOFF_SETTINGS: BackoffSettings            = BackoffSettings(MIN_BACKOFF, MAX_BACKOFF, RANDOM_FACTOR)
 }
 
 class OrderProcessManagerSpec extends ScalaTestWithActorTestKit(OrderProcessManager1Spec.config) with AnyFreeSpecLike {

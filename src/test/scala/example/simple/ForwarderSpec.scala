@@ -3,11 +3,9 @@ package example.simple
 import akka.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ Behavior, BehaviorInterceptor, TypedActorContext }
-import akka.persistence.typed.PersistenceId
 import com.typesafe.config.{ Config, ConfigFactory }
 import example.CborSerializable
 import org.scalatest.freespec.AnyFreeSpecLike
-import org.scalatest.wordspec.AnyWordSpecLike
 
 import java.util.UUID
 import scala.concurrent.duration.DurationInt
