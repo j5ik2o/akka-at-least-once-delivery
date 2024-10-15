@@ -37,7 +37,7 @@ import java.time.Instant
 object BankAccountAggregate {
   private type CTX = ActorContext[BankAccountCommands.Command]
 
-  private[styleEffector] object States {
+  object States {
     sealed trait State extends example.support.State {
       override type This  = BankAccountAggregate.States.State
       override type Event = BankAccountEvents.Event

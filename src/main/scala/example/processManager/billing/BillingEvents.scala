@@ -12,6 +12,6 @@ object BillingEvents {
     def occurredAt: Instant
   }
 
-  final case class BillingCreated(id: UUID, billingId: BillingId, occurredAt: Instant)  extends Event
+  final case class BillingCreated(id: UUID, billingId: BillingId, occurredAt: Instant) extends Event
   final case class BillingApproved(id: UUID, billingId: BillingId, occurredAt: Instant) extends Event
 }

@@ -12,7 +12,7 @@ import scala.util.{ Failure, Success }
 
 object FibonacciProducer {
   sealed trait Command
-  private final case class AskReply(timeout: Boolean)                                                 extends Command
+  private final case class AskReply(timeout: Boolean) extends Command
   private case class WrappedRequestNext(r: ProducerController.RequestNext[FibonacciConsumer.Command]) extends Command
 
   def apply(consumerRef: ActorRef[FibonacciConsumer.Command]): Behavior[Command] = {

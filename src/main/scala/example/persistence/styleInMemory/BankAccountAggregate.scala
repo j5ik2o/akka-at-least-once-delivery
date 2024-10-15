@@ -15,7 +15,7 @@
  */
 package example.persistence.styleInMemory
 import akka.actor.typed.Behavior
-import akka.actor.typed.scaladsl.{ ActorContext, Behaviors }
+import akka.actor.typed.scaladsl.Behaviors
 import example.persistence.domain.BankAccount
 import example.persistence.{ BankAccountAggregateId, BankAccountCommands }
 

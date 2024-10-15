@@ -21,8 +21,8 @@ object OrderEvents {
       occurredAt: Instant
   ) extends Event
 
-  case class StockSecured(id: UUID, orderId: OrderId, occurredAt: Instant)    extends Event
-  case class BillingFailed(id: UUID, orderId: OrderId, occurredAt: Instant)   extends Event
-  case class OrderCommitted(id: UUID, orderId: OrderId, occurredAt: Instant)  extends Event
+  case class StockSecured(id: UUID, orderId: OrderId, occurredAt: Instant) extends Event
+  case class BillingFailed(id: UUID, orderId: OrderId, occurredAt: Instant) extends Event
+  case class OrderCommitted(id: UUID, orderId: OrderId, occurredAt: Instant) extends Event
   case class OrderRollbacked(id: UUID, orderId: OrderId, occurredAt: Instant) extends Event
 }

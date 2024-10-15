@@ -1,18 +1,14 @@
 package example.processManager
 
-import akka.actor.testkit.typed.scaladsl.{ ScalaTestWithActorTestKit, TestProbe }
-import akka.actor.typed.scaladsl.{ ActorContext, Behaviors }
+import akka.actor.testkit.typed.scaladsl.TestProbe
+import akka.actor.typed.scaladsl.ActorContext
 import akka.actor.typed.{ ActorRef, SupervisorStrategy }
 import com.typesafe.config.{ Config, ConfigFactory }
 import example.CborSerializable
-import example.processManager.OrderProcessManager2Spec._
-import example.processManager.OrderProtocol.CreateOrderReply
-import example.processManager.billing.{ BillingError, BillingId, BillingProtocol }
+import example.processManager.billing.BillingProtocol
 import example.processManager.stock.StockProtocol
-import org.scalatest.freespec.AnyFreeSpecLike
 
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 
 private case class OrderProcessManager2RefResult(
@@ -34,10 +30,7 @@ object OrderProcessManager2Spec {
     }
     """)
 
-  private def newOrderItems(): OrderItems = {
-    val orderItem = newOrderItem()
-    OrderItems(orderItem)
-  }
+  
 
   private def newOrderItem(): OrderItem = {
     val orderItemId = OrderItemId()
@@ -69,5 +62,5 @@ object OrderProcessManager2Spec {
   final val MIN_BACKOFF: FiniteDuration = 100.millis
   final val MAX_BACKOFF: FiniteDuration = 1000.millis
   final val RANDOM_FACTOR: Double       = 0.8
-  final val BACKOFF_SETTINGS            = BackoffSettings(MIN_BACKOFF, MAX_BACKOFF, RANDOM_FACTOR)
+  final val BACKOFF_SETTINGS: BackoffSettings            = BackoffSettings(MIN_BACKOFF, MAX_BACKOFF, RANDOM_FACTOR)
 }

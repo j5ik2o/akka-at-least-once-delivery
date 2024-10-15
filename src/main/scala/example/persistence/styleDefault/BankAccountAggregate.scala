@@ -36,7 +36,7 @@ object BankAccountAggregate {
 
   private[styleDefault] object States {
     sealed trait State
-    final case object NotCreated                                                            extends State
+    final case object NotCreated extends State
     final case class Created(aggregateId: BankAccountAggregateId, bankAccount: BankAccount) extends State
   }
 

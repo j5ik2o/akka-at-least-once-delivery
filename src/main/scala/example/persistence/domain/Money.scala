@@ -15,7 +15,8 @@
  */
 package example.persistence.domain
 
-import java.util.{Currency, Locale}
+import java.util.{ Currency, Locale }
+import scala.math.BigDecimal.javaBigDecimal2bigDecimal
 
 /** 金額を表すクラス。
   *
@@ -150,9 +151,8 @@ class Money(private val amount: BigDecimal, private val currency: Currency) exte
     *   金額
     */
   def dividedBy(divisor: BigDecimal, roundingMode: BigDecimal.RoundingMode.Value): Money = {
-    val newAmount =
-      amount.bigDecimal.divide(divisor.bigDecimal, roundingMode.id)
-    Money(BigDecimal(newAmount), currency)
+    val newAmount = divisor.bigDecimal / roundingMode.id
+    Money(newAmount, currency)
   }
 
   /** この金額を、`divisor`個に均等に分割した場合の金額を返す。
@@ -371,7 +371,7 @@ class Money(private val amount: BigDecimal, private val currency: Currency) exte
     * @return
     *   この金額よりも1ステップ分大きな金額
     */
-  private lazy val incremented: Money = add(minimumIncrement)
+  add(minimumIncrement)
 
   /** 最小の単位金額を返す。
     *
@@ -410,11 +410,11 @@ object Money {
 
   // implicit def bigDecimalToMoney(amount: Int) = apply(amount)
 
-  val USD = Currency.getInstance("USD")
+  val USD: Currency = Currency.getInstance("USD")
 
-  val EUR = Currency.getInstance("EUR")
+  val EUR: Currency = Currency.getInstance("EUR")
 
-  val JPY = Currency.getInstance("JPY")
+  val JPY: Currency = Currency.getInstance("JPY")
 
   val DefaultRoundingMode: BigDecimal.RoundingMode.Value =
     BigDecimal.RoundingMode.HALF_EVEN
@@ -423,7 +423,7 @@ object Money {
     new Money(amount, currency)
 
   def unapply(money: Money): Option[(BigDecimal, Currency)] =
-    Some(money.amount, money.currency)
+    Some((money.amount, money.currency))
 
   /** `amount`で表す量のドルを表すインスタンスを返す。
     *
